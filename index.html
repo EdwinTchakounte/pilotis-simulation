@@ -267,19 +267,24 @@ function showInfo(html){
 // Le descriptif d'une obligation ou d'un reporting (objet issu de BC).
 function obligationInfoHtml(o){
   const isRep=o.kind==="Reporting";
-  const accent=isRep?CO.blue:CO.violet;
+  const isAdd=!!o.added;
+  const accent=isAdd?CO.teal:(isRep?CO.blue:CO.violet);
+  const tag=isAdd?"Obligation (ajout expert)":(isRep?"Reporting":"Engagement");
   const declLbl=(typeof DECL!=="undefined"&&DECL[o.declencheur])?DECL[o.declencheur][0]:(o.declencheur||"");
-  let h='<div class="dtag" style="background:'+accent+'22;color:'+accent+'">'+ico(isRep?"file":"shield")+'<span>'+(isRep?"Reporting":"Engagement")+'</span></div>';
+  let h='<div class="dtag" style="background:'+accent+'22;color:'+accent+'">'+ico(isAdd?"upload":(isRep?"file":"shield"))+'<span>'+tag+'</span></div>';
   h+='<h3>'+clean(o.name||o.id)+'</h3>';
   h+='<div class="dref">'+clean(o.id||"")+(o.entite?' · '+clean(o.entite):'')+'</div>';
   h+='<div class="dsec"><h4>Caracteristiques</h4><ul class="dcasc">';
   if(declLbl)h+='<li>Declencheur : <b>'+clean(declLbl)+'</b></li>';
+  if(o.evenement)h+='<li>Evenement declencheur : <b>'+clean(o.evenement)+'</b></li>';
+  if(o.contenant)h+='<li>Contenant : '+(o.contenant==="operation"?"Operation (deal)":"Recurrent (societe)")+'</li>';
   if(o.periodicite)h+='<li>Periodicite : '+clean(o.periodicite)+'</li>';
   if(isRep&&o.deadline)h+='<li>Echeance : '+clean(o.deadline)+'</li>';
   if(o.domain)h+='<li>Domaine : '+clean(o.domain)+'</li>';
   h+='<li>Criticite : '+clean(o.crit||"non precisee")+'</li>';
   if(isRep)h+='<li>Destinataire : <b>'+clean(o.destinataire||"?")+'</b> ('+clean(o.nature_dest||"externe")+')</li>';
   h+='</ul></div>';
+  if(isAdd)h+='<div class="dnote">Ajoutee par l\'expert - telechargeable depuis l\'onglet Instanciation pour mettre a jour le referentiel.</div>';
   if(isRep&&o.sources&&o.sources.length){
     h+='<div class="dsec"><h4>Informations a rassembler pour la redaction</h4><ul class="dcasc">';
     o.sources.forEach(s=>{const ext=s.portee==="externe";const pc=ext?CO.amber:CO.teal;h+='<li>'+clean(s.info)+' <span class="badge" style="background:'+pc+'22;color:'+pc+'">'+(ext?"Externe":"Interne")+'</span></li>';});
@@ -856,8 +861,9 @@ function instanciationView(){
   wrap.appendChild(selRow);
 
   // -- 2. obligations PAR DEFAUT (socle recurrent) + les AJOUTS de l'expert --
-  const defaults=BC.filter(o=>o.entite===instEnt).map(o=>({name:o.name,declencheur:o.declencheur||"event_based",added:false}));
-  const mesAjouts=ajouts.filter(a=>a.entite===instEnt).map(a=>({name:a.intitule,declencheur:a.declencheur,added:true,evenement:a.evenement}));
+  const defaults=BC.filter(o=>o.entite===instEnt).map(o=>({name:o.name,declencheur:o.declencheur||"event_based",added:false,full:o}));
+  const mesAjouts=ajouts.filter(a=>a.entite===instEnt).map(a=>({name:a.intitule,declencheur:a.declencheur,added:true,evenement:a.evenement,
+    full:{name:a.intitule,declencheur:a.declencheur,crit:a.criticite,entite:instEnt,evenement:a.evenement,contenant:a.contenant,added:true}}));
   const all=defaults.concat(mesAjouts);
   const byDecl={}; all.forEach(o=>{(byDecl[o.declencheur]=byDecl[o.declencheur]||[]).push(o);});
   const def=el("div",{class:"card"});
@@ -866,7 +872,7 @@ function instanciationView(){
   defh.appendChild(el("span",{class:"lg"},defaults.length+" par defaut"+(mesAjouts.length?" + "+mesAjouts.length+" ajout(s)":"")));
   def.appendChild(defh);
   def.appendChild(el("p",{class:"cap",style:"margin:2px 0 12px;padding:0"},
-    "Ce que l'instance porte, organise par l'action qui l'ouvre. Les obligations ajoutees par l'expert apparaissent ici, taguees."));
+    "Ce que l'instance porte, organise par l'action qui l'ouvre. Cliquez une obligation pour son descriptif. Les ajouts de l'expert apparaissent ici, tagues."));
   const grid=el("div",{style:"display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px"});
   DECL_ORDER.forEach(d=>{
     const items=byDecl[d]; if(!items||!items.length)return;
@@ -879,11 +885,12 @@ function instanciationView(){
     card.appendChild(el("div",{class:"cap",style:"padding:6px 12px 4px;margin:0;font-size:11px"},hint));
     const ul=el("div",{style:"padding:0 12px 12px;display:flex;flex-direction:column;gap:6px"});
     items.slice(0,5).forEach(o=>{
-      const row=el("div",{style:"font-size:12px;line-height:1.35;color:var(--ink);display:flex;gap:6px;align-items:baseline"});
+      const row=el("div",{style:"font-size:12px;line-height:1.35;color:var(--ink);display:flex;gap:6px;align-items:baseline;cursor:pointer"});
       row.appendChild(el("span",{style:"color:"+col},"•"));
       const tx=el("span",{},clean(o.name).slice(0,74));
       row.appendChild(tx);
       if(o.added)row.appendChild(el("span",{style:"font-size:9px;font-weight:800;color:"+CO.green+";background:"+CO.green+"1e;border-radius:6px;padding:1px 5px;white-space:nowrap"},"AJOUTE"));
+      if(o.full)row.onclick=()=>showInfo(obligationInfoHtml(o.full));
       ul.appendChild(row);
     });
     if(items.length>5)ul.appendChild(el("div",{class:"cap",style:"padding:0;margin:2px 0 0;font-size:11px"},"+ "+(items.length-5)+" autres"));
