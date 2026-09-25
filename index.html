@@ -551,7 +551,7 @@ function recurrentView(){
 function feedbackView(){
   const wrap=el("div"); const card=el("div",{class:"card"});
   card.appendChild(el("h2",{style:"margin:0 0 4px;font-size:18px;font-weight:800"},"Avis des experts"));
-  card.appendChild(el("p",{class:"fb-note",style:"margin:0 0 16px"},"Laissez votre appreciation sur le flow. Les avis sont enregistres et partages entre relecteurs, sans backend a installer."));
+  card.appendChild(el("p",{class:"fb-note",style:"margin:0 0 16px"},"Laissez votre appreciation sur le flow. Les avis sont enregistres dans votre navigateur et TELECHARGEABLES (JSON / CSV) pour traiter et mettre a jour le referentiel."));
   const form=el("div",{class:"fb-form"});
   const nom=el("input",{type:"text",placeholder:"Votre nom / role"});
   // Les avis se rattachent d'abord aux OBLIGATIONS : constats d'operation + reportings recurrents.
@@ -578,26 +578,66 @@ function feedbackView(){
   form.appendChild(el("label",{},"Commentaire")); form.appendChild(cmt);
   const rowb=el("div",{style:"display:flex;gap:12px;align-items:center"}); rowb.appendChild(send); rowb.appendChild(status); form.appendChild(rowb);
   card.appendChild(form);
+  // Barre d'exploitation : telecharger les retours pour traiter et mettre a jour le referentiel.
+  const tools=el("div",{style:"display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0 8px"});
+  const dlJson=el("button",{class:"btn ghost"},"Telecharger (JSON)");
+  const dlCsv=el("button",{class:"btn ghost"},"Telecharger (CSV)");
+  const clearBtn=el("button",{class:"btn ghost"},"Vider");
+  const count=el("span",{class:"fb-note"},"");
+  tools.appendChild(el("span",{class:"fb-note",style:"font-weight:700"},"Exploiter les retours :"));
+  tools.appendChild(dlJson); tools.appendChild(dlCsv); tools.appendChild(clearBtn); tools.appendChild(count);
+  card.appendChild(tools);
   const list=el("div",{class:"fb-list"}); card.appendChild(list); wrap.appendChild(card);
+
+  // Stockage local (marche partout, sans backend) = source de verite pour le telechargement.
+  const LSKEY="pilotis-avis";
+  function loadLocal(){try{return JSON.parse(localStorage.getItem(LSKEY)||"[]");}catch(e){return [];}}
+  function saveLocal(a){try{localStorage.setItem(LSKEY,JSON.stringify(a));}catch(e){}}
+  let avis=loadLocal();
+  const keyOf=a=>(a.ts||"")+"|"+(a.nom||"")+"|"+(a.commentaire||"").slice(0,24);
+  function mergeIn(items){const seen={};avis.forEach(a=>seen[keyOf(a)]=1);let added=0;
+    items.forEach(a=>{const k=keyOf(a);if(!seen[k]){seen[k]=1;avis.push(a);added++;}});
+    if(added){avis.sort((x,y)=>(y.ts||0)-(x.ts||0));saveLocal(avis);}return added;}
+
+  function dl(name,txt,mime){const b=new Blob([txt],{type:mime});const u=URL.createObjectURL(b);
+    const a=el("a",{href:u,download:name});document.body.appendChild(a);a.click();a.remove();
+    setTimeout(()=>URL.revokeObjectURL(u),1500);}
+  function toCSV(items){const esc=s=>'"'+String(s==null?"":s).replace(/"/g,'""')+'"';
+    const head=["date","nom","obligation","verdict","commentaire"];
+    const rows=items.map(a=>[new Date(a.ts||Date.now()).toISOString(),a.nom||"",a.obligation||a.scenario||"",a.verdict||"",a.commentaire||""].map(esc).join(","));
+    return head.map(esc).join(",")+"\n"+rows.join("\n");}
+  const stamp=()=>new Date().toISOString().slice(0,10);
+  dlJson.onclick=()=>{if(!avis.length){status.textContent="Aucun avis a telecharger.";return;}
+    dl("avis-pilotis-"+stamp()+".json",JSON.stringify(avis,null,2),"application/json");};
+  dlCsv.onclick=()=>{if(!avis.length){status.textContent="Aucun avis a telecharger.";return;}
+    dl("avis-pilotis-"+stamp()+".csv",toCSV(avis),"text/csv;charset=utf-8");};
+  clearBtn.onclick=()=>{if(!avis.length)return;
+    if(!confirm("Vider les avis enregistres dans ce navigateur ? (telechargez-les d'abord)"))return;
+    avis=[];saveLocal(avis);renderList(avis);};
+
   const VC={ok:["Valide",CO.green],revoir:["A revoir",CO.amber],bloquant:["Bloquant",CO.red]};
-  function renderList(items){ if(!items.length){list.innerHTML='<p class="fb-note">Aucun avis pour le moment.</p>';return;}
+  function renderList(items){ count.textContent=items.length+" avis enregistre(s)";
+    if(!items.length){list.innerHTML='<p class="fb-note">Aucun avis pour le moment.</p>';return;}
     list.innerHTML=""; items.forEach(a=>{const [vl,vc]=VC[a.verdict]||["",CO.grey];
       const obl=a.obligation||a.scenario||""; const sn=obl?obl:"Portee generale";
       list.appendChild(el("div",{class:"fb-item",html:'<div class="h"><span class="who">'+clean(a.nom||"Anonyme")+'</span><span class="badge" style="background:'+vc+'22;color:'+vc+'">'+vl+'</span></div><div class="fb-obl">'+ico("folder")+'<span>'+clean(sn)+'</span></div><div class="cmt">'+clean(a.commentaire||"")+'</div><div class="meta">'+new Date(a.ts||Date.now()).toLocaleString("fr-FR")+'</div>'}));});}
-  renderList([]);
+  renderList(avis);
+
+  // Si la page est publiee en artifact (db partagee) : on synchronise l'affichage ET on
+  // rapatrie en local, pour que le telechargement contienne aussi les avis partages.
   let dbRef=null;
-  (async()=>{ if(!window.claude){status.textContent="Recueil disponible une fois la page publiee et partagee.";return;}
-    let db=null; try{db=await claude.use("db");}catch(e){}
-    if(!db){status.textContent="Recueil indisponible dans cette vue.";return;}
+  (async()=>{ if(!window.claude)return; let db=null; try{db=await claude.use("db");}catch(e){} if(!db)return;
     dbRef=db.collection("avis");
-    try{const unsub=dbRef.orderBy("ts","desc").limit(200).onSnapshot(s=>renderList(s.docs.map(d=>d.data())),e=>{status.textContent="Lecture impossible : "+e.code;}); stopFns.push(unsub);}catch(e){status.textContent="Lecture impossible.";}
+    try{const unsub=dbRef.orderBy("ts","desc").limit(300).onSnapshot(s=>{mergeIn(s.docs.map(d=>d.data()));renderList(avis);},()=>{}); stopFns.push(unsub);}catch(e){}
   })();
+
   send.onclick=async()=>{ const c=cmt.value.trim(); if(!c){status.textContent="Ecrivez un commentaire.";return;}
     let obl=scen.value||""; if(obl==="__autre__"){obl=autreInp.value.trim(); if(!obl){status.textContent="Nommez l'obligation a ajouter.";autreInp.focus();return;}}
-    if(!dbRef){status.textContent="Recueil indisponible (publiez et partagez la page).";return;}
-    send.disabled=true;status.textContent="Envoi...";
-    try{ await dbRef.add({nom:nom.value.trim()||"Anonyme",obligation:obl,verdict:verdict,commentaire:c,ts:Date.now()}); cmt.value="";if(scen.value==="__autre__"){autreInp.value="";}status.textContent="Avis enregistre. Merci.";}
-    catch(e){status.textContent="Echec : "+(e.code||e.message||"erreur");} finally{send.disabled=false;}
+    const entry={nom:nom.value.trim()||"Anonyme",obligation:obl,verdict:verdict,commentaire:c,ts:Date.now()};
+    avis.unshift(entry); saveLocal(avis); renderList(avis);
+    cmt.value=""; if(scen.value==="__autre__"){autreInp.value="";}
+    status.textContent="Avis enregistre (telechargeable ci-dessous). Merci.";
+    if(dbRef){try{await dbRef.add(entry);}catch(e){}}
   };
   return wrap;
 }
