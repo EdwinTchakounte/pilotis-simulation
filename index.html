@@ -253,6 +253,41 @@ const ICONS={
 function icoInner(name){return '<path d="'+(ICONS[name]||ICONS.file)+'"/>';}
 function ico(name,extra){return '<svg class="ic'+(extra?' '+extra:'')+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+icoInner(name)+'</svg>';}
 
+// ---- Drawer PARTAGE : detail cliquable d'une obligation / d'un reporting ----
+// Reutilisable par toutes les vues (alertes, instanciation...). Un seul panneau,
+// pose sur le body, referme au clic sur le fond.
+let _iov=null,_idr=null;
+function hideInfo(){if(_idr){_idr.classList.remove("on");_iov.classList.remove("on");}}
+function showInfo(html){
+  if(!_idr){_iov=el("div",{class:"pk-ov"});_idr=el("div",{class:"pk-drawer"});document.body.appendChild(_iov);document.body.appendChild(_idr);_iov.onclick=hideInfo;}
+  _idr.innerHTML='<button class="dclose">Fermer</button>'+html;
+  _idr.querySelector(".dclose").onclick=hideInfo;
+  _idr.classList.add("on");_iov.classList.add("on");
+}
+// Le descriptif d'une obligation ou d'un reporting (objet issu de BC).
+function obligationInfoHtml(o){
+  const isRep=o.kind==="Reporting";
+  const accent=isRep?CO.blue:CO.violet;
+  const declLbl=(typeof DECL!=="undefined"&&DECL[o.declencheur])?DECL[o.declencheur][0]:(o.declencheur||"");
+  let h='<div class="dtag" style="background:'+accent+'22;color:'+accent+'">'+ico(isRep?"file":"shield")+'<span>'+(isRep?"Reporting":"Engagement")+'</span></div>';
+  h+='<h3>'+clean(o.name||o.id)+'</h3>';
+  h+='<div class="dref">'+clean(o.id||"")+(o.entite?' · '+clean(o.entite):'')+'</div>';
+  h+='<div class="dsec"><h4>Caracteristiques</h4><ul class="dcasc">';
+  if(declLbl)h+='<li>Declencheur : <b>'+clean(declLbl)+'</b></li>';
+  if(o.periodicite)h+='<li>Periodicite : '+clean(o.periodicite)+'</li>';
+  if(isRep&&o.deadline)h+='<li>Echeance : '+clean(o.deadline)+'</li>';
+  if(o.domain)h+='<li>Domaine : '+clean(o.domain)+'</li>';
+  h+='<li>Criticite : '+clean(o.crit||"non precisee")+'</li>';
+  if(isRep)h+='<li>Destinataire : <b>'+clean(o.destinataire||"?")+'</b> ('+clean(o.nature_dest||"externe")+')</li>';
+  h+='</ul></div>';
+  if(isRep&&o.sources&&o.sources.length){
+    h+='<div class="dsec"><h4>Informations a rassembler pour la redaction</h4><ul class="dcasc">';
+    o.sources.forEach(s=>{const ext=s.portee==="externe";const pc=ext?CO.amber:CO.teal;h+='<li>'+clean(s.info)+' <span class="badge" style="background:'+pc+'22;color:'+pc+'">'+(ext?"Externe":"Interne")+'</span></li>';});
+    h+='</ul></div>';
+  }
+  return h;
+}
+
 // vitesse globale (1 lent .. 10 rapide) -> multiplicateur de duree
 let speedVal=5;
 function mul(){ return (12-speedVal)/6; }   // 1 -> ~1.83 (lent), 10 -> ~0.33 (rapide)
@@ -708,9 +743,11 @@ function alertesView(){
       const ul=el("div",{style:"padding:10px 12px;display:grid;gap:8px"});
       grp[k].forEach(o=>{
         const kd=o.kind==="Reporting"?CO.blue:CO.violet;
-        ul.appendChild(el("div",{style:"font-size:12px;border-left:3px solid "+color+"55;padding-left:8px",
+        const row=el("div",{style:"font-size:12px;border-left:3px solid "+color+"55;padding-left:8px;cursor:pointer",
           html:'<b>'+clean(o.id)+'</b> <span class="badge" style="background:'+kd+'18;color:'+kd+'">'+clean(o.kind)+'</span> '+clean((o.name||"").slice(0,54))
-          +'<div style="color:var(--mute);font-size:11px;margin-top:3px">'+clean(o.entite)+' · '+clean((o.crit||"sanction non precisee").slice(0,80))+'</div>'}));
+          +'<div style="color:var(--mute);font-size:11px;margin-top:3px">'+clean(o.entite)+' · '+clean((o.crit||"sanction non precisee").slice(0,80))+' <span class="more">detail</span></div>'});
+        row.onclick=()=>showInfo(obligationInfoHtml(o));
+        ul.appendChild(row);
       });
       box.appendChild(ul); g.appendChild(box);
     });
@@ -732,7 +769,8 @@ function alertesView(){
   const rgrid=el("div",{style:"display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px"});
   reps.forEach(o=>{
     const [dl,dc]=PORT[o.nature_dest||"externe"];
-    const box=el("div",{style:"border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--surface);box-shadow:var(--shadow)"});
+    const box=el("div",{style:"border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--surface);box-shadow:var(--shadow);cursor:pointer"});
+    box.onclick=()=>showInfo(obligationInfoHtml(o));
     const hd=el("div",{style:"display:flex;justify-content:space-between;align-items:flex-start;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line)"});
     hd.appendChild(el("div",{style:"min-width:0",html:'<div style="font-weight:700;font-size:13px;color:var(--ink)">'+clean((o.name||o.id).slice(0,60))+'</div><div class="cap" style="padding:0;font-size:11px">'+clean(o.entite)+(o.periodicite?' · '+clean(o.periodicite.slice(0,26)):'')+'</div>'}));
     hd.appendChild(el("span",{style:"flex-shrink:0;font-size:10px;font-weight:800;color:"+dc+";background:"+dc+"1e;border-radius:8px;padding:3px 8px;white-space:nowrap"},dl));
@@ -746,6 +784,7 @@ function alertesView(){
       row.appendChild(el("span",{style:"color:var(--ink)"},clean(s.info)));
       row.appendChild(el("span",{style:"flex-shrink:0;font-size:9px;font-weight:800;color:"+pc+";background:"+pc+"1e;border-radius:6px;padding:1px 6px"},pl));
       body.appendChild(row);});
+    body.appendChild(el("div",{class:"more",style:"margin-top:8px;display:inline-block"},"voir le descriptif"));
     box.appendChild(body);
     rgrid.appendChild(box);
   });
@@ -976,7 +1015,7 @@ function instanciationView(){
   return wrap;
 }
 
-function draw(){clearTimers();const m=document.getElementById('main');m.innerHTML="";
+function draw(){clearTimers();hideInfo();const m=document.getElementById('main');m.innerHTML="";
   let v;
   if(view==="instanciation")v=instanciationView();
   else if(view==="parcours")v=parcoursView();
