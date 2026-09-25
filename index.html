@@ -257,7 +257,9 @@ function ico(name,extra){return '<svg class="ic'+(extra?' '+extra:'')+'" viewBox
 let speedVal=5;
 function mul(){ return (12-speedVal)/6; }   // 1 -> ~1.83 (lent), 10 -> ~0.33 (rapide)
 
-let view="instanciation";
+const VIEWS=["instanciation","parcours","recurrent","alertes","avis"];
+let view=location.hash.replace("#","");
+if(!VIEWS.includes(view))view="instanciation";
 let stopFns=[];
 function clearTimers(){ stopFns.forEach(f=>{try{f();}catch(e){}}); stopFns=[]; }
 
@@ -830,7 +832,10 @@ function draw(){clearTimers();const m=document.getElementById('main');m.innerHTM
   else if(view==="alertes")v=alertesView();
   else v=feedbackView();
   m.appendChild(v);}
-document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{document.querySelectorAll('#tabs button').forEach(x=>x.classList.remove('on'));b.classList.add('on');view=b.getAttribute('data-v');draw();});
+function syncTabs(){document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on',x.getAttribute('data-v')===view));}
+syncTabs();
+document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>{view=b.getAttribute('data-v');try{location.hash=view;}catch(e){}syncTabs();draw();});
+window.addEventListener('hashchange',()=>{const v=location.hash.replace('#','');if(VIEWS.includes(v)&&v!==view){view=v;syncTabs();draw();}});
 // bascule clair / sombre (persistee par visiteur)
 const themeBtn=document.getElementById('themeBtn');
 function setTheme(t){document.documentElement.setAttribute('data-theme',t);try{localStorage.setItem('pk-theme',t);}catch(e){}
