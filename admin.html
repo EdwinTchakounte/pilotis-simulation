@@ -50,6 +50,46 @@
 </style>
 </head>
 <body>
+<!-- Porte d'identification admin : garde d'entree cote client (code distinct de la simulation) -->
+<style>
+  .sim-gate{position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;background:linear-gradient(160deg,#002864,#0a1730);padding:16px}
+  .sim-gate__card{width:100%;max-width:360px;background:#fff;border-radius:14px;padding:28px 24px;box-shadow:0 20px 60px rgba(0,0,0,.35);font-family:system-ui,Segoe UI,Roboto,Arial,sans-serif}
+  .sim-gate__t{margin:0 0 4px;font-size:19px;font-weight:800;color:#002864}
+  .sim-gate__s{margin:0 0 18px;font-size:13px;color:#7B879E;line-height:1.4}
+  .sim-gate__l{display:block;font-size:12px;font-weight:700;color:#2B3346;margin:0 0 6px}
+  .sim-gate__in{width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid #E8ECF6;border-radius:9px;font-size:15px;outline:none}
+  .sim-gate__in:focus{border-color:#002864;box-shadow:0 0 0 3px rgba(0,40,100,.12)}
+  .sim-gate__b{width:100%;margin-top:14px;padding:11px 12px;border:0;border-radius:9px;background:#002864;color:#fff;font-size:15px;font-weight:700;cursor:pointer}
+  .sim-gate__b:hover{background:#013a8f}
+  .sim-gate__e{min-height:16px;margin:8px 0 0;font-size:12.5px;color:#c0392b}
+</style>
+<div class="sim-gate" id="simGate">
+  <form class="sim-gate__card" id="simGateForm" autocomplete="off">
+    <p class="sim-gate__t">Pilotis - Administration</p>
+    <p class="sim-gate__s">Espace reserve. Merci de saisir le code administrateur.</p>
+    <label class="sim-gate__l" for="simGatePwd">Code administrateur</label>
+    <input class="sim-gate__in" id="simGatePwd" type="password" placeholder="Votre code" autofocus>
+    <p class="sim-gate__e" id="simGateErr"></p>
+    <button class="sim-gate__b" type="submit">Entrer</button>
+  </form>
+</div>
+<script>
+(function(){
+  // Code administrateur (distinct du code expert). A changer ici si besoin.
+  var GATE_CODE = "PilotisAdmin2026!";
+  var KEY = "pilotis-admin-gate-ok";
+  var gate = document.getElementById("simGate");
+  function unlock(){ try{ sessionStorage.setItem(KEY,"1"); }catch(e){} if(gate){ gate.remove(); } }
+  var ok=false; try{ ok = sessionStorage.getItem(KEY)==="1"; }catch(e){}
+  if(ok){ unlock(); return; }
+  var f=document.getElementById("simGateForm"), err=document.getElementById("simGateErr"), pwd=document.getElementById("simGatePwd");
+  f.addEventListener("submit",function(ev){
+    ev.preventDefault();
+    if((pwd.value||"")===GATE_CODE){ unlock(); }
+    else{ err.textContent="Code incorrect."; pwd.value=""; pwd.focus(); }
+  });
+})();
+</script>
 <div class="top"></div>
 <header>
   <h1>Pilotis - Administration des retours</h1>
