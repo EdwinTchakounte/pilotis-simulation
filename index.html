@@ -309,7 +309,11 @@ function fmtSize(b){b=b||0;return b<1024?b+" o":(b<1048576?(b/1024).toFixed(0)+"
 
 // ---- Envoi au BACKEND simulation (optionnel) : best-effort, en plus du localStorage.
 // L'URL vient de ?api=... (persistee) ou du champ "API backend" du bandeau.
-function apiBase(){try{const u=new URLSearchParams(location.search).get("api");if(u){localStorage.setItem("pilotis-api",u);}return (localStorage.getItem("pilotis-api")||"").replace(/\/+$/,"");}catch(e){return "";}}
+function apiBase(){try{const u=new URLSearchParams(location.search).get("api");if(u){localStorage.setItem("pilotis-api",u);}
+  let b=(localStorage.getItem("pilotis-api")||"").replace(/\/+$/,"");
+  // En prod, deduire l'API du domaine : simulation-pilotis.<x> -> api.simulation-pilotis.<x>
+  if(!b && location.hostname.indexOf("simulation-pilotis.")===0)b="https://api."+location.hostname;
+  return b;}catch(e){return "";}}
 function apiSetBase(u){try{localStorage.setItem("pilotis-api",(u||"").trim().replace(/\/+$/,""));}catch(e){}}
 function apiSendJSON(method,path,body){const b=apiBase();if(!b)return;try{fetch(b+path,{method:method,headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).catch(()=>{});}catch(e){}}
 function apiUpload(path,form){const b=apiBase();if(!b)return Promise.resolve(null);try{return fetch(b+path,{method:"POST",body:form}).then(r=>r.ok?r.json():null).catch(()=>null);}catch(e){return Promise.resolve(null);}}

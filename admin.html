@@ -24,14 +24,15 @@
   .btn{border:1px solid var(--line);border-radius:999px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer;background:var(--surface);color:var(--ink)}
   .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
   .cap{color:var(--mute);font-size:12px}
-  .stat{display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 2px}
-  .kpi{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 14px;min-width:120px}
-  .kpi .n{font-size:22px;font-weight:800}
-  .kpi .l{font-size:11px;color:var(--mute)}
+  .stat{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px;margin:6px 0 4px}
+  .kpi{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--blue);border-radius:14px;padding:12px 16px;box-shadow:var(--shadow)}
+  .kpi .n{font-size:26px;font-weight:800;line-height:1}
+  .kpi .l{font-size:11px;color:var(--mute);margin-top:4px;text-transform:uppercase;letter-spacing:.4px}
   h2{font-size:15px;font-weight:800;margin:0 0 8px}
-  table{width:100%;border-collapse:collapse}
-  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);font-size:12.5px;vertical-align:top}
-  th{color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.4px}
+  table{width:100%;border-collapse:separate;border-spacing:0}
+  th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);font-size:12.5px;vertical-align:top}
+  th{color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.4px;position:sticky;top:0;background:var(--surface)}
+  tbody tr:hover{background:color-mix(in srgb, var(--blue) 5%, transparent)}
   .badge{border-radius:8px;padding:2px 8px;font-size:11px;font-weight:800;white-space:nowrap}
   .tabs{display:flex;gap:6px;margin:8px 0 14px;flex-wrap:wrap}
   .tabs button{background:var(--surface);border:1px solid var(--line);color:var(--mute);border-radius:999px;padding:7px 14px;font-weight:700;cursor:pointer}
@@ -118,7 +119,9 @@ $("theme").onclick=()=>setTheme(document.documentElement.getAttribute("data-them
 (function(){let t=null;try{t=localStorage.getItem("pilotis-admin-theme");}catch(e){}if(!t)t=(matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";setTheme(t);})();
 
 // api url persistee + param ?api=
-(function(){const u=new URLSearchParams(location.search).get("api");let saved="";try{saved=localStorage.getItem("pilotis-admin-api")||"";}catch(e){}$("api").value=u||saved;})();
+(function(){const u=new URLSearchParams(location.search).get("api");let saved="";try{saved=localStorage.getItem("pilotis-admin-api")||"";}catch(e){}
+  let d="";if(location.hostname.indexOf("simulation-pilotis.")===0)d="https://api."+location.hostname;
+  $("api").value=u||saved||d;})();
 
 function loadLocal(k,def){try{return JSON.parse(localStorage.getItem(k)||def);}catch(e){return JSON.parse(def);}}
 
@@ -161,7 +164,7 @@ function kpis(){
   const a=data.reviews.filter(r=>(r.appreciation||"").trim()).length;
   [["Revues",data.reviews.length,"#2563EB"],["Validees",v,"#46A873"],["Rejetees",j,"#DC7E7E"],
    ["Avec appreciation",a,"#8A72E2"],["Obligations ajoutees",data.obligations.length,"#33A99B"]]
-   .forEach(([l,n,c])=>box.appendChild(el("div",{class:"kpi",html:'<div class="n" style="color:'+c+'">'+n+'</div><div class="l">'+l+'</div>'})));
+   .forEach(([l,n,c])=>box.appendChild(el("div",{class:"kpi",style:"border-left-color:"+c,html:'<div class="n" style="color:'+c+'">'+n+'</div><div class="l">'+l+'</div>'})));
 }
 
 function render(){
