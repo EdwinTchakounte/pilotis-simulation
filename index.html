@@ -221,6 +221,9 @@
 const DATA = JSON.parse(document.getElementById('data').textContent);
 const BC = JSON.parse(document.getElementById('bc').textContent);
 const clean = s => (s==null?"":String(s)).replace(/[—–]/g,"-");
+// Tronque proprement avec une ellipsis : le texte n'a jamais l'air "coupe/incomplet",
+// et le texte COMPLET reste disponible au clic (drawer). Source = base de connaissance.
+const cut = (s,n) => {s=clean(s);return s.length>n?s.slice(0,n-1)+"…":s;};
 const el=(t,a={},h)=>{const e=document.createElement(t);for(const k in a){if(k==="class")e.className=a[k];else if(k==="html")e.innerHTML=a[k];else e.setAttribute(k,a[k]);}if(h!=null)e.innerHTML=h;return e;};
 const CO={blue:"#5B84EF",teal:"#33A99B",violet:"#8A72E2",amber:"#E4A250",green:"#46A873",red:"#DC7E7E",grey:"#9AA6BC",sky:"#5AB6E0",navy:"#3a4b73",proc:"#0E9AA0",veil:"#C98B2E",client:"#0891B2"};
 
@@ -528,7 +531,7 @@ function referentielView(){
       const vc=rv?(rv.verdict==="valide"?CO.green:(rv.verdict==="rejete"?CO.red:CO.grey)):null;
       const card=el("div",{style:"border:1px solid var(--line);border-radius:9px;padding:7px 8px;cursor:pointer;font-size:11.5px;line-height:1.3;background:var(--bg)"
         +(vc?";border-left:3px solid "+vc:"")});
-      card.appendChild(el("div",{style:"color:var(--ink)"},clean(o.name).slice(0,70)));
+      card.appendChild(el("div",{style:"color:var(--ink)"},cut(o.name,90)));
       const meta=el("div",{style:"display:flex;gap:5px;align-items:center;margin-top:4px;flex-wrap:wrap"});
       if(o.added)meta.appendChild(el("span",{style:"font-size:8px;font-weight:800;color:"+CO.teal+";background:"+CO.teal+"1e;border-radius:5px;padding:1px 4px"},"AJOUT"));
       if(rv)meta.appendChild(el("span",{style:"font-size:8px;font-weight:800;color:"+vc+";background:"+vc+"1e;border-radius:5px;padding:1px 4px"},rv.verdict==="valide"?"VALIDE":"REJETE"));
@@ -612,7 +615,7 @@ function alertingSection(){
     const ul=el("div",{style:"padding:10px 12px;display:grid;gap:8px"});
     grp[k].forEach(o=>{const rv=rev[o.id];const vc=rv?(rv.verdict==="valide"?CO.green:CO.red):null;
       const row=el("div",{style:"font-size:12px;border-left:3px solid "+(vc||c+"55")+";padding-left:8px;cursor:pointer",
-        html:'<b>'+clean(o.id||"")+'</b> '+clean((o.name||"").slice(0,52))+(rv?' <span class="badge" style="background:'+vc+'22;color:'+vc+'">'+(rv.verdict==="valide"?"validee":"rejetee")+'</span>':'')+'<div style="color:var(--mute);font-size:11px;margin-top:2px">'+clean((o.crit||"").slice(0,70))+' <span class="more">detail</span></div>'});
+        html:'<b>'+clean(o.id||"")+'</b> '+cut(o.name||"",70)+(rv?' <span class="badge" style="background:'+vc+'22;color:'+vc+'">'+(rv.verdict==="valide"?"validee":"rejetee")+'</span>':'')+'<div style="color:var(--mute);font-size:11px;margin-top:2px">'+cut(o.crit||"",90)+' <span class="more">detail</span></div>'});
       row.onclick=()=>showObligation(o);ul.appendChild(row);});
     box.appendChild(ul);g.appendChild(box);});
   card.appendChild(g);
