@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pilotis - Administration des retours</title>
+<style>
+  :root{--bg:#F5F7FC;--surface:#FFFFFF;--ink:#2B3346;--mute:#7B879E;--line:#E8ECF6;--navy:#002864;
+    --blue:#2563EB;--green:#46A873;--amber:#E4A250;--red:#DC7E7E;--teal:#33A99B;--violet:#8A72E2;
+    --shadow:0 8px 24px rgba(43,51,70,.06);}
+  @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#141a26;--surface:#1b2333;--ink:#E7ECF6;--mute:#9AA6BC;--line:#28324a;--shadow:0 8px 24px rgba(0,0,0,.25);}}
+  :root[data-theme="dark"]{--bg:#141a26;--surface:#1b2333;--ink:#E7ECF6;--mute:#9AA6BC;--line:#28324a;--shadow:0 8px 24px rgba(0,0,0,.25);}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;font-size:14px}
+  .top{background:linear-gradient(90deg,#00B894,#2563EB,#8A72E2);height:4px}
+  header{padding:16px 20px 0}
+  h1{margin:0;font-size:20px;font-weight:800;color:var(--navy)}
+  .sub{color:var(--mute);font-size:13px;margin:2px 0 0}
+  main{padding:16px 20px 40px;max-width:1200px}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);padding:16px;margin-bottom:16px}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  input,select{border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:13px;background:var(--surface);color:var(--ink)}
+  input.grow{flex:1;min-width:240px}
+  .btn{border:1px solid var(--line);border-radius:999px;padding:7px 14px;font-size:13px;font-weight:700;cursor:pointer;background:var(--surface);color:var(--ink)}
+  .btn.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+  .cap{color:var(--mute);font-size:12px}
+  .stat{display:flex;gap:14px;flex-wrap:wrap;margin:6px 0 2px}
+  .kpi{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px 14px;min-width:120px}
+  .kpi .n{font-size:22px;font-weight:800}
+  .kpi .l{font-size:11px;color:var(--mute)}
+  h2{font-size:15px;font-weight:800;margin:0 0 8px}
+  table{width:100%;border-collapse:collapse}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);font-size:12.5px;vertical-align:top}
+  th{color:var(--mute);font-size:11px;text-transform:uppercase;letter-spacing:.4px}
+  .badge{border-radius:8px;padding:2px 8px;font-size:11px;font-weight:800;white-space:nowrap}
+  .tabs{display:flex;gap:6px;margin:8px 0 14px;flex-wrap:wrap}
+  .tabs button{background:var(--surface);border:1px solid var(--line);color:var(--mute);border-radius:999px;padding:7px 14px;font-weight:700;cursor:pointer}
+  .tabs button.on{background:var(--navy);color:#fff;border-color:var(--navy)}
+  a.dl{color:var(--blue);text-decoration:none;font-weight:700}
+  .empty{color:var(--mute);text-align:center;padding:30px}
+</style>
+</head>
+<body>
+<div class="top"></div>
+<header>
+  <h1>Pilotis - Administration des retours</h1>
+  <p class="sub">Previsualiser les retours des experts : revues (valider/rejeter + appreciation), obligations ajoutees, templates. Phase de collecte et de validation du flow.</p>
+</header>
+<main>
+  <div class="card">
+    <div class="row">
+      <span class="cap" style="font-weight:700">Source des donnees :</span>
+      <input id="api" class="grow" placeholder="URL du backend simulation (ex: https://api.simulation-pilotis.manage.inov-consulting.com) - vide = navigateur local">
+      <select id="ent">
+        <option value="">Toutes les entites</option>
+        <option value="Financia-Gestion">Financia-Gestion</option>
+        <option value="Financia-Bourse">Financia-Bourse</option>
+      </select>
+      <button class="btn primary" id="load">Charger</button>
+      <button class="btn" id="theme">Theme</button>
+      <span class="cap" id="status"></span>
+    </div>
+    <div class="cap" style="margin-top:8px">Sans URL de backend, la page lit les retours <b>de ce navigateur</b> (localStorage). Avec l'URL, elle agrege les retours de <b>tous les experts</b>.</div>
+  </div>
+
+  <div class="stat" id="kpis"></div>
+
+  <div class="tabs" id="tabs">
+    <button data-v="reviews" class="on">Revues</button>
+    <button data-v="obligations">Obligations ajoutees</button>
+    <button data-v="templates">Templates</button>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between;margin-bottom:10px">
+      <h2 id="secTitle">Revues</h2>
+      <div class="row">
+        <button class="btn" id="csv">Telecharger (CSV)</button>
+        <button class="btn" id="json">Tout exporter (JSON)</button>
+      </div>
+    </div>
+    <div id="body"></div>
+  </div>
+</main>
+
+<script>
+"use strict";
+const CO={valide:"#46A873",rejete:"#DC7E7E","":"#9AA6BC"};
+const el=(t,a={},h)=>{const e=document.createElement(t);for(const k in a){if(k==="class")e.className=a[k];else if(k==="html")e.innerHTML=a[k];else e.setAttribute(k,a[k]);}if(h!=null)e.textContent=h;return e;};
+const clean=s=>(s==null?"":String(s));
+const $=id=>document.getElementById(id);
+let view="reviews";
+let data={reviews:[],obligations:[],templates:[]};
+
+// theme
+function setTheme(t){document.documentElement.setAttribute("data-theme",t);try{localStorage.setItem("pilotis-admin-theme",t);}catch(e){}}
+$("theme").onclick=()=>setTheme(document.documentElement.getAttribute("data-theme")==="dark"?"light":"dark");
+(function(){let t=null;try{t=localStorage.getItem("pilotis-admin-theme");}catch(e){}if(!t)t=(matchMedia&&matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";setTheme(t);})();
+
+// api url persistee + param ?api=
+(function(){const u=new URLSearchParams(location.search).get("api");let saved="";try{saved=localStorage.getItem("pilotis-admin-api")||"";}catch(e){}$("api").value=u||saved;})();
+
+function loadLocal(k,def){try{return JSON.parse(localStorage.getItem(k)||def);}catch(e){return JSON.parse(def);}}
+
+async function load(){
+  const base=$("api").value.trim().replace(/\/$/,"");
+  try{localStorage.setItem("pilotis-admin-api",base);}catch(e){}
+  const ent=$("ent").value;
+  $("status").textContent="Chargement...";
+  if(base){
+    try{
+      const q=ent?("?entite="+encodeURIComponent(ent)):"";
+      const [rv,ob]=await Promise.all([
+        fetch(base+"/reviews"+q).then(r=>r.json()),
+        fetch(base+"/obligations"+q).then(r=>r.json()),
+      ]);
+      data.reviews=Array.isArray(rv)?rv:[];
+      data.obligations=Array.isArray(ob)?ob:[];
+      data.templates=[]; // listes de templates : chargees a la demande par obligation (endpoint /templates)
+      data._base=base;
+      $("status").textContent="Charge depuis le backend ("+data.reviews.length+" revues).";
+    }catch(e){$("status").textContent="Backend injoignable : "+e.message+" - repli local.";localMode(ent);}
+  }else{localMode(ent);}
+  render();
+}
+function localMode(ent){
+  const rev=loadLocal("pilotis-revue","{}");
+  data.reviews=Object.values(rev).filter(r=>!ent||r.entite===ent);
+  data.obligations=loadLocal("pilotis-obl-ajout","[]").filter(o=>!ent||o.entite===ent);
+  const tpl=loadLocal("pilotis-templates","{}");
+  data.templates=Object.entries(tpl).flatMap(([id,arr])=>(arr||[]).map(x=>({obligation_id:id,...x})));
+  data._base="";
+  $("status").textContent="Retours de ce navigateur (local) : "+data.reviews.length+" revues.";
+}
+
+function kpis(){
+  const box=$("kpis");box.innerHTML="";
+  const v=data.reviews.filter(r=>r.verdict==="valide").length;
+  const j=data.reviews.filter(r=>r.verdict==="rejete").length;
+  const a=data.reviews.filter(r=>(r.appreciation||"").trim()).length;
+  [["Revues",data.reviews.length,"#2563EB"],["Validees",v,"#46A873"],["Rejetees",j,"#DC7E7E"],
+   ["Avec appreciation",a,"#8A72E2"],["Obligations ajoutees",data.obligations.length,"#33A99B"]]
+   .forEach(([l,n,c])=>box.appendChild(el("div",{class:"kpi",html:'<div class="n" style="color:'+c+'">'+n+'</div><div class="l">'+l+'</div>'})));
+}
+
+function render(){
+  kpis();
+  const body=$("body");body.innerHTML="";
+  $("secTitle").textContent=view==="reviews"?"Revues":(view==="obligations"?"Obligations ajoutees":"Templates");
+  if(view==="reviews"){
+    if(!data.reviews.length){body.innerHTML='<div class="empty">Aucune revue.</div>';return;}
+    const t=el("table");t.innerHTML='<thead><tr><th>Entite</th><th>Obligation</th><th>Verdict</th><th>Appreciation</th><th>Date</th></tr></thead>';
+    const tb=el("tbody");
+    data.reviews.sort((x,y)=>(y.ts||0)-(x.ts||0)).forEach(r=>{
+      const c=CO[r.verdict]||CO[""];const lab=r.verdict==="valide"?"Valide":(r.verdict==="rejete"?"Rejete":"-");
+      const tr=el("tr");
+      tr.innerHTML='<td>'+clean(r.entite)+'</td><td><b>'+clean(r.id)+'</b><br><span class="cap">'+clean(r.name||"")+'</span></td>'
+        +'<td><span class="badge" style="background:'+c+'22;color:'+c+'">'+lab+'</span></td>'
+        +'<td>'+clean(r.appreciation||"")+'</td><td class="cap">'+(r.ts?new Date(r.ts).toLocaleString("fr-FR"):"")+'</td>';
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb);body.appendChild(t);
+  }else if(view==="obligations"){
+    if(!data.obligations.length){body.innerHTML='<div class="empty">Aucune obligation ajoutee.</div>';return;}
+    const t=el("table");t.innerHTML='<thead><tr><th>Entite</th><th>Intitule</th><th>Declencheur</th><th>Evenement</th><th>Criticite</th></tr></thead>';
+    const tb=el("tbody");
+    data.obligations.forEach(o=>{const tr=el("tr");
+      tr.innerHTML='<td>'+clean(o.entite)+'</td><td>'+clean(o.intitule)+'</td><td>'+clean(o.declencheur)+'</td><td>'+clean(o.evenement||"")+'</td><td>'+clean(o.criticite||"")+'</td>';
+      tb.appendChild(tr);});
+    t.appendChild(tb);body.appendChild(t);
+  }else{
+    if(!data.templates.length){body.innerHTML='<div class="empty">Aucun template (en mode backend, ouvrez une obligation pour lister ses templates).</div>';return;}
+    const t=el("table");t.innerHTML='<thead><tr><th>Obligation</th><th>#</th><th>Nom</th><th>Nomenclature</th><th></th></tr></thead>';
+    const tb=el("tbody");
+    data.templates.forEach(x=>{const tr=el("tr");
+      let dl="";
+      if(x.dataUrl)dl='<a class="dl" href="'+x.dataUrl+'" download="'+(x.filename||x.obligation_id+'_tpl_'+x.n)+'">Telecharger</a>';
+      else if(x.key&&data._base)dl='<a class="dl" href="'+data._base+'/templates/content?key='+encodeURIComponent(x.key)+'" target="_blank">Ouvrir</a>';
+      tr.innerHTML='<td><b>'+clean(x.obligation_id)+'</b></td><td>'+clean(x.n)+'</td><td>'+clean(x.name)+'</td><td class="cap">'+clean(x.nomenclature||x.key||"")+'</td><td>'+dl+'</td>';
+      tb.appendChild(tr);});
+    t.appendChild(tb);body.appendChild(t);
+  }
+}
+
+function dl(name,txt,mime){const b=new Blob([txt],{type:mime});const u=URL.createObjectURL(b);const a=el("a",{href:u,download:name});document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1500);}
+$("csv").onclick=()=>{
+  const esc=s=>'"'+String(s==null?"":s).replace(/"/g,'""')+'"';
+  const rows=data.reviews.map(r=>[new Date(r.ts||Date.now()).toISOString(),r.entite,r.id,r.name,r.verdict,r.appreciation].map(esc).join(","));
+  dl("retours-experts-"+new Date().toISOString().slice(0,10)+".csv",["date,entite,obligation_id,obligation,verdict,appreciation"].concat(rows).join("\n"),"text/csv;charset=utf-8");
+};
+$("json").onclick=()=>dl("retours-experts-"+new Date().toISOString().slice(0,10)+".json",JSON.stringify(data,null,2),"application/json");
+
+document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>{document.querySelectorAll("#tabs button").forEach(x=>x.classList.remove("on"));b.classList.add("on");view=b.getAttribute("data-v");render();});
+$("load").onclick=load;
+$("ent").onchange=load;
+load();
+</script>
+</body>
+</html>
