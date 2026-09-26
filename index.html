@@ -557,43 +557,78 @@ function referentielView(){
 // La simulation stocke en local ; le vrai stockage MinIO se fait cote atelier
 // du front reel. La nomenclature affichee est celle qui serait utilisee serveur.
 function templatesSection(){
-  const card=el("div",{class:"card"});
-  card.appendChild(el("h3",{style:"margin:0 0 2px;font-size:15px;font-weight:800"},"Templates de reporting"));
+  const card=el("div",{class:"card",style:"border-left:4px solid "+CO.sky});
+  card.appendChild(el("h3",{style:"margin:0 0 2px;font-size:16px;font-weight:800",html:'<span style="display:inline-flex;vertical-align:-3px;margin-right:6px;color:'+CO.sky+'">'+ico("upload")+'</span>Templates de reporting (documents rattaches)'}));
   card.appendChild(el("p",{class:"cap",style:"margin:2px 0 12px;padding:0"},
-    "Pour chaque reporting, chargez un ou plusieurs exemples de template (texte). Ils sont numerotes (1, 2, ...) et nommes selon la nomenclature du reporting - stockage MinIO cote serveur ; ici en local, telechargeables."));
+    "Chargez le DOCUMENT template de chaque reporting (Word, PDF, Excel, texte...). Plusieurs exemples possibles, numerotes 1, 2, ... et nommes selon la nomenclature du reporting. Stockage MinIO cote serveur ; ici en local, telechargeables."));
   const reps=BC.filter(o=>o.kind==="Reporting"&&o.entite===refEnt);
-  const selR=el("select",{style:"border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:13px;background:var(--surface);color:var(--ink);min-width:280px"});
-  reps.forEach(r=>selR.appendChild(el("option",{value:r.id},(r.id?r.id+" - ":"")+clean((r.name||"").slice(0,50)))));
-  const nameI=el("input",{type:"text",placeholder:"Nom du template (ex: modele COSUMAF v1)",style:"border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:13px;background:var(--surface);color:var(--ink);flex:1;min-width:200px"});
-  const fileI=el("input",{type:"file",accept:".txt,.md,.csv,text/*",style:"font-size:12px"});
-  const ta=el("textarea",{placeholder:"Coller ici le contenu texte du template (ou choisir un fichier ci-dessus)",style:"width:100%;min-height:90px;border:1px solid var(--line);border-radius:10px;padding:8px;font-size:12px;background:var(--surface);color:var(--ink);box-sizing:border-box"});
-  fileI.onchange=()=>{const f=fileI.files&&fileI.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{ta.value=String(rd.result||"").slice(0,20000);if(!nameI.value)nameI.value=f.name;};rd.readAsText(f);};
-  const addB=el("button",{class:"btn primary"},"Ajouter l'exemple");
-  const st=el("span",{class:"cap",style:"padding:0"},"");
-  const row1=el("div",{style:"display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px"});
-  row1.appendChild(selR);row1.appendChild(nameI);row1.appendChild(fileI);
-  card.appendChild(row1);card.appendChild(ta);
-  const row2=el("div",{style:"display:flex;gap:10px;align-items:center;margin:8px 0"});row2.appendChild(addB);row2.appendChild(st);card.appendChild(row2);
-  const listWrap=el("div",{style:"display:flex;flex-direction:column;gap:6px"}); card.appendChild(listWrap);
-  function nomencl(repId,n){return "reportings/"+repId+"/"+repId+"__tpl_"+n+".txt";}
+  const MAXB=1.4*1024*1024;
+  function ext(fn){const m=/\.([a-z0-9]+)$/i.exec(fn||"");return m?m[1].toLowerCase():"txt";}
+  function nomencl(repId,n,e){return "reportings/"+repId+"/"+repId+"__tpl_"+n+"."+e;}
+  function fmtSize(b){return b<1024?b+" o":(b<1048576?(b/1024).toFixed(0)+" Ko":(b/1048576).toFixed(1)+" Mo");}
+
+  // Apercu par reporting : chaque reporting et son nombre de templates (cliquable).
+  const overview=el("div",{style:"display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px"});
+  const selRow=el("div",{style:"display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px"});
+  const selR=el("select",{style:"border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:13px;background:var(--surface);color:var(--ink);min-width:320px"});
+  reps.forEach(r=>selR.appendChild(el("option",{value:r.id},(r.id?r.id+" - ":"")+clean((r.name||"").slice(0,52)))));
+  selRow.appendChild(el("span",{class:"cap",style:"padding:0;font-weight:700"},"Reporting :"));selRow.appendChild(selR);
+  card.appendChild(overview);card.appendChild(selRow);
+
+  // Zone de depot (dropzone) + nom + texte optionnel.
+  const drop=el("label",{style:"display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;border:2px dashed var(--line);border-radius:14px;padding:18px;cursor:pointer;background:var(--surface);text-align:center"});
+  const fileI=el("input",{type:"file",style:"display:none"});
+  drop.appendChild(el("span",{style:"color:"+CO.sky+";display:inline-flex",html:ico("upload")}));
+  const dropTxt=el("span",{class:"cap",style:"padding:0;font-weight:700"},"Deposer un document template (ou cliquer) - Word, PDF, Excel, texte...");
+  const dropSub=el("span",{class:"cap",style:"padding:0;font-size:11px"},"Aucun fichier choisi");
+  drop.appendChild(dropTxt);drop.appendChild(dropSub);drop.appendChild(fileI);
+  let picked=null;
+  drop.ondragover=e=>{e.preventDefault();drop.style.borderColor=CO.sky;};
+  drop.ondragleave=()=>{drop.style.borderColor="var(--line)";};
+  drop.ondrop=e=>{e.preventDefault();drop.style.borderColor="var(--line)";const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f){picked=f;dropSub.textContent=f.name+" ("+fmtSize(f.size)+")";if(!nameI.value)nameI.value=f.name;}};
+  fileI.onchange=()=>{const f=fileI.files&&fileI.files[0];if(f){picked=f;dropSub.textContent=f.name+" ("+fmtSize(f.size)+")";if(!nameI.value)nameI.value=f.name;}};
+  card.appendChild(drop);
+  const nameI=el("input",{type:"text",placeholder:"Nom du template (ex: modele COSUMAF v1)",style:"border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:13px;background:var(--surface);color:var(--ink);width:100%;box-sizing:border-box;margin-top:10px"});
+  card.appendChild(nameI);
+  const ta=el("textarea",{placeholder:"Ou coller directement un contenu texte (optionnel, si pas de fichier)",style:"width:100%;min-height:70px;border:1px solid var(--line);border-radius:10px;padding:8px;font-size:12px;background:var(--surface);color:var(--ink);box-sizing:border-box;margin-top:8px"});
+  card.appendChild(ta);
+  const addB=el("button",{class:"btn primary",style:"margin-top:8px"},"Ajouter le template");
+  const st=el("span",{class:"cap",style:"padding:0;margin-left:8px"},"");
+  const rowb=el("div",{style:"margin-top:8px"});rowb.appendChild(addB);rowb.appendChild(st);card.appendChild(rowb);
+  const listWrap=el("div",{style:"display:flex;flex-direction:column;gap:6px;margin-top:12px"}); card.appendChild(listWrap);
+
+  function renderOverview(){overview.innerHTML="";const t=loadTpl();
+    reps.forEach(r=>{const c=(t[r.id]||[]).length;const on=r.id===selR.value;
+      const chip=el("button",{style:"border:1px solid "+(c?CO.sky:"var(--line)")+";border-radius:999px;padding:4px 10px;font-size:11px;cursor:pointer;background:"+(on?CO.sky:(c?CO.sky+"14":"transparent"))+";color:"+(on?"#fff":(c?CO.sky:"var(--mute)"))},r.id+" ("+c+")");
+      chip.onclick=()=>{selR.value=r.id;render();};overview.appendChild(chip);});
+  }
   function render(){
+    renderOverview();
     listWrap.innerHTML="";const t=loadTpl();const repId=selR.value;const arr=(t[repId]||[]);
-    listWrap.appendChild(el("div",{class:"cap",style:"padding:0;font-weight:700"},arr.length+" exemple(s) pour "+repId));
+    listWrap.appendChild(el("div",{class:"cap",style:"padding:0;font-weight:700"},arr.length+" template(s) pour "+repId));
     arr.forEach(x=>{
       const it=el("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:10px;border:1px solid var(--line);border-radius:10px;padding:8px 10px"});
-      it.appendChild(el("div",{style:"min-width:0",html:'<div style="font-size:12.5px;font-weight:600;color:var(--ink)">'+x.n+' - '+clean(x.name)+'</div><div class="cap" style="padding:0;font-size:11px">'+clean(x.nomenclature)+' · '+(x.content?x.content.length:0)+' caracteres</div>'}));
-      const bd=el("button",{class:"btn ghost"},"Telecharger");bd.onclick=()=>dlFile(repId+"__tpl_"+x.n+".txt",x.content||"","text/plain;charset=utf-8");
+      const meta=(x.filename?clean(x.filename)+" · "+fmtSize(x.size||0)+(x.stored?"":" (metadonnees seules - trop volumineux en local)"):(x.content?x.content.length+" caracteres":""));
+      it.appendChild(el("div",{style:"min-width:0",html:'<div style="font-size:12.5px;font-weight:600;color:var(--ink)">'+x.n+' - '+clean(x.name)+'</div><div class="cap" style="padding:0;font-size:11px">'+clean(x.nomenclature)+'</div><div class="cap" style="padding:0;font-size:11px">'+meta+'</div>'}));
+      const acts=el("div",{style:"display:flex;gap:6px;flex-shrink:0"});
+      if(x.dataUrl){const bd=el("a",{class:"btn ghost",href:x.dataUrl,download:(x.filename||repId+"_tpl_"+x.n)});bd.textContent="Telecharger";acts.appendChild(bd);}
+      else if(x.content){const bd=el("button",{class:"btn ghost"},"Telecharger");bd.onclick=()=>dlFile(repId+"__tpl_"+x.n+".txt",x.content,"text/plain;charset=utf-8");acts.appendChild(bd);}
       const br=el("button",{class:"btn ghost"},"Retirer");br.onclick=()=>{const tt=loadTpl();tt[repId]=(tt[repId]||[]).filter(y=>y.n!==x.n);saveTpl(tt);render();};
-      const acts=el("div",{style:"display:flex;gap:6px;flex-shrink:0"});acts.appendChild(bd);acts.appendChild(br);it.appendChild(acts);
-      listWrap.appendChild(it);
+      acts.appendChild(br);it.appendChild(acts);listWrap.appendChild(it);
     });
   }
   selR.onchange=render;
-  addB.onclick=()=>{const repId=selR.value;const content=ta.value.trim();const nm=nameI.value.trim()||"template";
-    if(!content){st.textContent="Collez le contenu ou choisissez un fichier.";return;}
-    const t=loadTpl();const arr=t[repId]||[];const n=arr.length+1;
-    arr.push({n:n,name:nm,content:content.slice(0,20000),nomenclature:nomencl(repId,n),ts:Date.now()});
-    t[repId]=arr;saveTpl(t);ta.value="";nameI.value="";if(fileI)fileI.value="";st.textContent="Exemple "+n+" ajoute ("+nomencl(repId,n)+").";render();};
+  function commit(entry){const t=loadTpl();const repId=selR.value;const arr=t[repId]||[];const n=arr.length+1;
+    entry.n=n;entry.nomenclature=nomencl(repId,n,entry.ext||"txt");entry.ts=Date.now();
+    arr.push(entry);t[repId]=arr;try{saveTpl(t);}catch(e){st.textContent="Stockage local plein - reduisez la taille.";return;}
+    picked=null;fileI.value="";dropSub.textContent="Aucun fichier choisi";nameI.value="";ta.value="";
+    st.textContent="Template "+n+" ajoute ("+entry.nomenclature+").";render();}
+  addB.onclick=()=>{const repId=selR.value;const nm=nameI.value.trim()|| (picked?picked.name:"template");
+    if(picked){const f=picked;const e=ext(f.name);
+      if(f.size>MAXB){commit({name:nm,filename:f.name,mime:f.type,size:f.size,ext:e,stored:false});return;}
+      const rd=new FileReader();rd.onload=()=>commit({name:nm,filename:f.name,mime:f.type,size:f.size,ext:e,dataUrl:String(rd.result||""),stored:true});rd.readAsDataURL(f);return;}
+    const c=ta.value.trim();if(!c){st.textContent="Deposez un document ou collez un texte.";return;}
+    commit({name:nm,content:c.slice(0,20000),ext:"txt",size:c.length,stored:true});};
   render();
   return card;
 }
