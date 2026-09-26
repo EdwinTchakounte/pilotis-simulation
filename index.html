@@ -209,11 +209,8 @@
   </div>
 </header>
 <div class="tabs" id="tabs">
-  <button data-v="instanciation" class="on">Instanciation</button>
-  <button data-v="parcours">Parcours</button>
-  <button data-v="recurrent">Obligations recurrentes</button>
-  <button data-v="alertes">Alertes &amp; criticite</button>
-  <button data-v="avis">Avis experts</button>
+  <button data-v="referentiel" class="on">Referentiel &amp; revue</button>
+  <button data-v="parcours">Simulation</button>
 </div>
 <main id="main"></main>
 
@@ -293,13 +290,46 @@ function obligationInfoHtml(o){
   return h;
 }
 
+// ---- Revue de l'expert : verdict + appreciation par obligation (localStorage) ----
+const REV_KEY="pilotis-revue", AJOUT_KEY="pilotis-obl-ajout", TPL_KEY="pilotis-templates";
+function loadRev(){try{return JSON.parse(localStorage.getItem(REV_KEY)||"{}");}catch(e){return {};}}
+function saveRev(r){try{localStorage.setItem(REV_KEY,JSON.stringify(r));}catch(e){}}
+function loadAjouts(){try{return JSON.parse(localStorage.getItem(AJOUT_KEY)||"[]");}catch(e){return [];}}
+function saveAjouts(a){try{localStorage.setItem(AJOUT_KEY,JSON.stringify(a));}catch(e){}}
+function loadTpl(){try{return JSON.parse(localStorage.getItem(TPL_KEY)||"{}");}catch(e){return {};}}
+function saveTpl(t){try{localStorage.setItem(TPL_KEY,JSON.stringify(t));}catch(e){}}
+function dlFile(name,txt,mime){const b=new Blob([txt],{type:mime});const u=URL.createObjectURL(b);const a=el("a",{href:u,download:name});document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1500);}
+
+// Drawer descriptif + REVUE (valider / rejeter / appreciation) d'une obligation.
+function showObligation(o){
+  const rv=(loadRev()[o.id]||{});
+  let h=obligationInfoHtml(o);
+  h+='<div class="dsec"><h4>Revue de l\'expert</h4>';
+  h+='<div style="display:flex;gap:8px;margin:6px 0">';
+  [["valide","Valider",CO.green],["rejete","Rejeter",CO.red]].forEach(([k,l,c])=>{
+    const on=rv.verdict===k;
+    h+='<button data-k="'+k+'" class="rvb" style="border:1px solid '+c+';border-radius:999px;padding:5px 16px;font-size:13px;font-weight:700;cursor:pointer;background:'+(on?c:"transparent")+';color:'+(on?"#fff":c)+'">'+l+'</button>';
+  });
+  h+='</div>';
+  h+='<textarea id="rvappr" placeholder="Appreciation, correction, precision, ou ce qui manque..." style="width:100%;min-height:76px;border:1px solid var(--line);border-radius:10px;padding:8px;font-size:13px;background:var(--surface);color:var(--ink);box-sizing:border-box">'+clean(rv.appreciation||"")+'</textarea>';
+  h+='<button id="rvsave" class="btn primary" style="margin-top:8px">Enregistrer la revue</button>';
+  h+='<span id="rvst" class="cap" style="padding:0;margin-left:8px"></span></div>';
+  showInfo(h);
+  let verdict=rv.verdict||"";
+  _idr.querySelectorAll(".rvb").forEach(b=>b.onclick=()=>{verdict=b.getAttribute("data-k");
+    _idr.querySelectorAll(".rvb").forEach(x=>{const k=x.getAttribute("data-k");const c=k==="valide"?CO.green:CO.red;const on=k===verdict;x.style.background=on?c:"transparent";x.style.color=on?"#fff":c;});});
+  _idr.querySelector("#rvsave").onclick=()=>{const r=loadRev();
+    r[o.id]={id:o.id,name:o.name,event:o.event||"",entite:o.entite||"",kind:o.kind||"",verdict:verdict,appreciation:_idr.querySelector("#rvappr").value.trim(),ts:Date.now()};
+    saveRev(r);hideInfo();draw();};
+}
+
 // vitesse globale (1 lent .. 10 rapide) -> multiplicateur de duree
 let speedVal=5;
 function mul(){ return (12-speedVal)/6; }   // 1 -> ~1.83 (lent), 10 -> ~0.33 (rapide)
 
-const VIEWS=["instanciation","parcours","recurrent","alertes","avis"];
+const VIEWS=["referentiel","parcours"];
 let view=location.hash.replace("#","");
-if(!VIEWS.includes(view))view="instanciation";
+if(!VIEWS.includes(view))view="referentiel";
 let stopFns=[];
 function clearTimers(){ stopFns.forEach(f=>{try{f();}catch(e){}}); stopFns=[]; }
 
@@ -416,6 +446,236 @@ const ipoD=DATA.dossiers.find(d=>d.cartouche==="introduction-en-bourse");
 const opsD=DATA.dossiers.find(d=>d.cartouche==="operation-significative");
 const hByC=c=>DATA.handoffs.find(h=>h.contract===c);
 
+/* ============================================================================
+   ONGLET 1 : REFERENTIEL & REVUE
+   Listing des evenements declencheurs -> obligations jointes (kanban du flow par
+   groupe), revue expert (valider/rejeter + appreciation), ajout d'obligation
+   (champs base de connaissance), templates de reporting, alerting. Tout est
+   descriptif et telechargeable (CSV/JSON) pour partager les specifications.
+   ============================================================================ */
+let refEnt="Financia-Gestion";
+// Colonnes du flux (kanban), du declenchement au verdict humain.
+const KAN=[["attente","En attente",CO.grey],["active","Declenchee",CO.blue],
+  ["pieces","Pieces / donnees",CO.violet],["agent","Agent propose",CO.teal],["valide","Verdict humain",CO.green]];
+
+function _normBC(o){return {id:o.id,name:o.name,kind:o.kind,declencheur:o.declencheur,entite:o.entite,
+  crit:o.crit,periodicite:o.periodicite,domain:o.domain,destinataire:o.destinataire,nature_dest:o.nature_dest,
+  deadline:o.deadline,sources:o.sources,event:"Creation d'instance"};}
+function _normCart(it,i,k,lab){return {id:k.toUpperCase().replace(/-/g,'').slice(0,10)+"-"+(i+1),
+  name:(typeof it==="string"?it:(it.obligation||"")),kind:"Obligation",declencheur:"event_based",
+  entite:refEnt,event:lab,nature:(it&&it.type)||"",expected:(it&&it.expected_evidence)||"",crit:""};}
+
+function referentielView(){
+  const wrap=el("div");
+  const rev=loadRev();
+
+  // -- hero + selecteur societe + export --
+  const hero=el("div",{class:"card",style:"border-top:3px solid "+CO.blue});
+  hero.appendChild(el("h2",{style:"margin:0 0 2px;font-size:19px;font-weight:800"},"Referentiel & revue par evenement declencheur"));
+  hero.appendChild(el("p",{class:"cap",style:"margin:0 0 12px;padding:0"},
+    "Chaque evenement declencheur et les obligations qu'il ouvre, en kanban. L'expert CHECKE : il valide/rejette, laisse une appreciation, ajoute ce qui manque - puis telecharge le retour (CSV) a partager."));
+  const bar=el("div",{style:"display:flex;gap:12px;align-items:center;flex-wrap:wrap"});
+  const seg=el("div",{style:"display:inline-flex;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:4px"});
+  [["Financia-Gestion",CO.blue],["Financia-Bourse",CO.violet]].forEach(([lab,col])=>{
+    const on=refEnt===lab;const b=el("button",{style:"border:0;border-radius:999px;padding:6px 14px;font-size:13px;font-weight:700;cursor:pointer;background:"+(on?col:"transparent")+";color:"+(on?"#fff":"var(--mute)")},lab);
+    b.onclick=()=>{refEnt=lab;draw();};seg.appendChild(b);});
+  bar.appendChild(el("span",{class:"cap",style:"padding:0;font-weight:700"},"Societe :"));
+  bar.appendChild(seg);
+  const nrev=Object.keys(rev).length;
+  const dlcsv=el("button",{class:"btn ghost"},"Telecharger la revue (CSV)");
+  const dljson=el("button",{class:"btn ghost"},"Tout exporter (JSON)");
+  dlcsv.onclick=()=>exportRevueCSV(); dljson.onclick=()=>exportRevueJSON();
+  const spacer=el("div",{style:"flex:1"});
+  bar.appendChild(spacer);bar.appendChild(el("span",{class:"cap",style:"padding:0"},nrev+" revue(s)"));bar.appendChild(dlcsv);bar.appendChild(dljson);
+  hero.appendChild(bar);
+  wrap.appendChild(hero);
+
+  // -- construction des EVENEMENTS de l'entite --
+  const EVENTS=[];
+  EVENTS.push({key:"instance",label:"Creation d'instance (socle recurrent)",
+    hint:"Obligations generees a l'instanciation cote console admin.",col:CO.navy,
+    obl:BC.filter(o=>o.entite===refEnt).map(_normBC)});
+  const cart=(DATA.referential&&DATA.referential.cartouches)||{};
+  [["entree-en-relation","Entree en relation (KYC)"],["operation-significative","Operation significative / ordre"],["introduction-en-bourse","Introduction en bourse (IPO)"]].forEach(([k,lab])=>{
+    const its=cart[k]||[]; if(its.length)EVENTS.push({key:k,label:lab,hint:"Obligations rattachees a cet evenement d'operation.",col:CO.violet,obl:its.map((it,i)=>_normCart(it,i,k,lab))});});
+  // ajouts de l'expert -> rattaches a leur evenement (nouveau groupe si besoin)
+  loadAjouts().filter(a=>a.entite===refEnt).forEach(a=>{
+    let g=EVENTS.find(e=>e.label===a.evenement);
+    const ob={id:a.id||("ADD-"+a.ts),name:a.intitule,kind:a.kind||"Obligation",declencheur:a.declencheur,entite:refEnt,event:a.evenement,crit:a.criticite,domain:a.domain,destinataire:a.destinataire,nature_dest:a.nature_dest,periodicite:a.periodicite,sources:a.sources,added:true,contenant:a.contenant};
+    if(!g){g={key:"add-"+a.ts,label:a.evenement||"Autre evenement",hint:"Evenement ajoute par l'expert.",col:CO.teal,obl:[]};EVENTS.push(g);}
+    g.obl.push(ob);
+  });
+
+  // -- rendu de chaque evenement : entete + KANBAN --
+  EVENTS.forEach(ev=>{
+    const sec=el("div",{class:"card",style:"border-left:4px solid "+ev.col});
+    const head=el("div",{style:"display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap"});
+    head.appendChild(el("h3",{style:"margin:0;font-size:15px;font-weight:800;color:"+ev.col,html:'<span style="display:inline-flex;vertical-align:-3px;margin-right:6px">'+ico("play")+'</span>'+clean(ev.label)}));
+    head.appendChild(el("span",{class:"lg"},ev.obl.length+" obligation(s)"));
+    sec.appendChild(head);
+    sec.appendChild(el("p",{class:"cap",style:"margin:2px 0 10px;padding:0"},ev.hint+" Cliquez une carte pour le descriptif et la revue."));
+    // kanban : 5 colonnes, cartes distribuees le long du flux (positions illustratives)
+    const board=el("div",{style:"display:grid;grid-template-columns:repeat("+KAN.length+",1fr);gap:8px"});
+    const cols={}; KAN.forEach(([k,lab,c])=>{
+      const cc=el("div",{style:"background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;min-height:60px"});
+      cc.appendChild(el("div",{style:"font-size:11px;font-weight:800;color:"+c+";padding:7px 9px;background:"+c+"12;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:6px",html:'<span style="width:8px;height:8px;border-radius:50%;background:'+c+';display:inline-block"></span>'+lab}));
+      const body=el("div",{style:"padding:7px;display:flex;flex-direction:column;gap:6px"}); cc.appendChild(body);
+      cols[k]=body; board.appendChild(cc);
+    });
+    ev.obl.forEach((o,i)=>{
+      const st=KAN[i%KAN.length][0];
+      const rv=rev[o.id];
+      const vc=rv?(rv.verdict==="valide"?CO.green:(rv.verdict==="rejete"?CO.red:CO.grey)):null;
+      const card=el("div",{style:"border:1px solid var(--line);border-radius:9px;padding:7px 8px;cursor:pointer;font-size:11.5px;line-height:1.3;background:var(--bg)"
+        +(vc?";border-left:3px solid "+vc:"")});
+      card.appendChild(el("div",{style:"color:var(--ink)"},clean(o.name).slice(0,70)));
+      const meta=el("div",{style:"display:flex;gap:5px;align-items:center;margin-top:4px;flex-wrap:wrap"});
+      if(o.added)meta.appendChild(el("span",{style:"font-size:8px;font-weight:800;color:"+CO.teal+";background:"+CO.teal+"1e;border-radius:5px;padding:1px 4px"},"AJOUT"));
+      if(rv)meta.appendChild(el("span",{style:"font-size:8px;font-weight:800;color:"+vc+";background:"+vc+"1e;border-radius:5px;padding:1px 4px"},rv.verdict==="valide"?"VALIDE":"REJETE"));
+      if(meta.children.length)card.appendChild(meta);
+      card.onclick=()=>showObligation(o);
+      cols[st].appendChild(card);
+    });
+    sec.appendChild(board);
+    wrap.appendChild(sec);
+  });
+
+  // -- TEMPLATES de reporting (upload texte, exemples numerotes, nomenclature MinIO) --
+  wrap.appendChild(templatesSection());
+  // -- ALERTING (criticite) --
+  wrap.appendChild(alertingSection());
+  // -- AJOUT d'obligation (champs base de connaissance) --
+  wrap.appendChild(addObligationSection());
+  return wrap;
+}
+
+// Section templates : par reporting, l'expert charge des exemples de template
+// (texte), numerotes 1,2,3... et nommes selon la nomenclature du reporting.
+// La simulation stocke en local ; le vrai stockage MinIO se fait cote atelier
+// du front reel. La nomenclature affichee est celle qui serait utilisee serveur.
+function templatesSection(){
+  const card=el("div",{class:"card"});
+  card.appendChild(el("h3",{style:"margin:0 0 2px;font-size:15px;font-weight:800"},"Templates de reporting"));
+  card.appendChild(el("p",{class:"cap",style:"margin:2px 0 12px;padding:0"},
+    "Pour chaque reporting, chargez un ou plusieurs exemples de template (texte). Ils sont numerotes (1, 2, ...) et nommes selon la nomenclature du reporting - stockage MinIO cote serveur ; ici en local, telechargeables."));
+  const reps=BC.filter(o=>o.kind==="Reporting"&&o.entite===refEnt);
+  const selR=el("select",{style:"border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:13px;background:var(--surface);color:var(--ink);min-width:280px"});
+  reps.forEach(r=>selR.appendChild(el("option",{value:r.id},(r.id?r.id+" - ":"")+clean((r.name||"").slice(0,50)))));
+  const nameI=el("input",{type:"text",placeholder:"Nom du template (ex: modele COSUMAF v1)",style:"border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:13px;background:var(--surface);color:var(--ink);flex:1;min-width:200px"});
+  const fileI=el("input",{type:"file",accept:".txt,.md,.csv,text/*",style:"font-size:12px"});
+  const ta=el("textarea",{placeholder:"Coller ici le contenu texte du template (ou choisir un fichier ci-dessus)",style:"width:100%;min-height:90px;border:1px solid var(--line);border-radius:10px;padding:8px;font-size:12px;background:var(--surface);color:var(--ink);box-sizing:border-box"});
+  fileI.onchange=()=>{const f=fileI.files&&fileI.files[0];if(!f)return;const rd=new FileReader();rd.onload=()=>{ta.value=String(rd.result||"").slice(0,20000);if(!nameI.value)nameI.value=f.name;};rd.readAsText(f);};
+  const addB=el("button",{class:"btn primary"},"Ajouter l'exemple");
+  const st=el("span",{class:"cap",style:"padding:0"},"");
+  const row1=el("div",{style:"display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px"});
+  row1.appendChild(selR);row1.appendChild(nameI);row1.appendChild(fileI);
+  card.appendChild(row1);card.appendChild(ta);
+  const row2=el("div",{style:"display:flex;gap:10px;align-items:center;margin:8px 0"});row2.appendChild(addB);row2.appendChild(st);card.appendChild(row2);
+  const listWrap=el("div",{style:"display:flex;flex-direction:column;gap:6px"}); card.appendChild(listWrap);
+  function nomencl(repId,n){return "reportings/"+repId+"/"+repId+"__tpl_"+n+".txt";}
+  function render(){
+    listWrap.innerHTML="";const t=loadTpl();const repId=selR.value;const arr=(t[repId]||[]);
+    listWrap.appendChild(el("div",{class:"cap",style:"padding:0;font-weight:700"},arr.length+" exemple(s) pour "+repId));
+    arr.forEach(x=>{
+      const it=el("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:10px;border:1px solid var(--line);border-radius:10px;padding:8px 10px"});
+      it.appendChild(el("div",{style:"min-width:0",html:'<div style="font-size:12.5px;font-weight:600;color:var(--ink)">'+x.n+' - '+clean(x.name)+'</div><div class="cap" style="padding:0;font-size:11px">'+clean(x.nomenclature)+' · '+(x.content?x.content.length:0)+' caracteres</div>'}));
+      const bd=el("button",{class:"btn ghost"},"Telecharger");bd.onclick=()=>dlFile(repId+"__tpl_"+x.n+".txt",x.content||"","text/plain;charset=utf-8");
+      const br=el("button",{class:"btn ghost"},"Retirer");br.onclick=()=>{const tt=loadTpl();tt[repId]=(tt[repId]||[]).filter(y=>y.n!==x.n);saveTpl(tt);render();};
+      const acts=el("div",{style:"display:flex;gap:6px;flex-shrink:0"});acts.appendChild(bd);acts.appendChild(br);it.appendChild(acts);
+      listWrap.appendChild(it);
+    });
+  }
+  selR.onchange=render;
+  addB.onclick=()=>{const repId=selR.value;const content=ta.value.trim();const nm=nameI.value.trim()||"template";
+    if(!content){st.textContent="Collez le contenu ou choisissez un fichier.";return;}
+    const t=loadTpl();const arr=t[repId]||[];const n=arr.length+1;
+    arr.push({n:n,name:nm,content:content.slice(0,20000),nomenclature:nomencl(repId,n),ts:Date.now()});
+    t[repId]=arr;saveTpl(t);ta.value="";nameI.value="";if(fileI)fileI.value="";st.textContent="Exemple "+n+" ajoute ("+nomencl(repId,n)+").";render();};
+  render();
+  return card;
+}
+
+// Section alerting : les obligations classees par criticite (cliquables/revue).
+function alertingSection(){
+  const card=el("div",{class:"card"});
+  card.appendChild(el("h3",{style:"margin:0 0 2px;font-size:15px;font-weight:800"},"Alerting - obligations par criticite"));
+  card.appendChild(el("p",{class:"cap",style:"margin:2px 0 12px;padding:0"},"Ce qui appelle une action, par gravite reglementaire. Cliquez pour le descriptif et la revue."));
+  const items=BC.filter(o=>o.entite===refEnt);const rev=loadRev();
+  const grp={critique:[],haute:[],normale:[]};items.forEach(o=>grp[critLevel(o.crit).k].push(o));
+  const g=el("div",{style:"display:flex;gap:12px;flex-wrap:wrap;align-items:flex-start"});
+  [["critique","Critique",CO.red],["haute","Haute",CO.amber],["normale","Normale",CO.teal]].forEach(([k,lab,c])=>{
+    if(!grp[k].length)return;
+    const box=el("div",{style:"flex:1;min-width:230px;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:var(--surface);box-shadow:var(--shadow)"});
+    const eh=el("div",{style:"display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:"+c+"14;border-bottom:1px solid var(--line)"});
+    eh.appendChild(el("span",{style:"font-weight:800;color:"+c+";display:flex;gap:7px;align-items:center",html:'<span style="width:9px;height:9px;border-radius:50%;background:'+c+';display:inline-block"></span>'+lab}));
+    eh.appendChild(el("span",{class:"lg"},String(grp[k].length)));box.appendChild(eh);
+    const ul=el("div",{style:"padding:10px 12px;display:grid;gap:8px"});
+    grp[k].forEach(o=>{const rv=rev[o.id];const vc=rv?(rv.verdict==="valide"?CO.green:CO.red):null;
+      const row=el("div",{style:"font-size:12px;border-left:3px solid "+(vc||c+"55")+";padding-left:8px;cursor:pointer",
+        html:'<b>'+clean(o.id||"")+'</b> '+clean((o.name||"").slice(0,52))+(rv?' <span class="badge" style="background:'+vc+'22;color:'+vc+'">'+(rv.verdict==="valide"?"validee":"rejetee")+'</span>':'')+'<div style="color:var(--mute);font-size:11px;margin-top:2px">'+clean((o.crit||"").slice(0,70))+' <span class="more">detail</span></div>'});
+      row.onclick=()=>showObligation(o);ul.appendChild(row);});
+    box.appendChild(ul);g.appendChild(box);});
+  card.appendChild(g);
+  return card;
+}
+
+// Section ajout d'obligation : champs de la base de connaissance.
+function addObligationSection(){
+  const card=el("div",{class:"card",style:"border-left:4px solid "+CO.teal});
+  card.appendChild(el("h3",{style:"margin:0 0 2px;font-size:15px;font-weight:800",html:'<span style="display:inline-flex;vertical-align:-3px;margin-right:6px;color:'+CO.teal+'">'+ico("upload")+'</span>Ajouter une obligation (champs base de connaissance)'}));
+  card.appendChild(el("p",{class:"cap",style:"margin:2px 0 12px;padding:0"},"L'expert ajoute une obligation avec les champs de la base ; elle rejoint le kanban de son evenement et l'export."));
+  const fs="border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:13px;background:var(--surface);color:var(--ink);width:100%;box-sizing:border-box";
+  const grid=el("div",{style:"display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px"});
+  function fld(l,n){const f=el("div",{style:"display:flex;flex-direction:column;gap:4px"});f.appendChild(el("label",{class:"cap",style:"padding:0;font-weight:700"},l));f.appendChild(n);return f;}
+  const iName=el("input",{type:"text",placeholder:"Nature de l'obligation",style:fs});
+  const iKind=el("select",{style:fs});[["Engagement","Engagement"],["Reporting","Reporting"]].forEach(([v,l])=>iKind.appendChild(el("option",{value:v},l)));
+  const iDecl=el("select",{style:fs});DECL_ORDER.forEach(d=>iDecl.appendChild(el("option",{value:d},DECL[d][0])));iDecl.value="event_based";
+  const EVN=["Creation d'instance (socle recurrent)","Entree en relation (KYC)","Operation significative / ordre","Introduction en bourse (IPO)","Modification du dossier d'agrement","Changement de dirigeant","Soupcon (LBC/FT)","Echeance calendaire"];
+  const iEvt=el("select",{style:fs});EVN.forEach(e=>iEvt.appendChild(el("option",{value:e},e)));iEvt.appendChild(el("option",{value:"__new__"},"+ Nouvel evenement..."));
+  const iNew=el("input",{type:"text",placeholder:"Nom du nouvel evenement",style:fs+";display:none"});
+  iEvt.onchange=()=>{iNew.style.display=iEvt.value==="__new__"?"block":"none";};
+  const iPeri=el("input",{type:"text",placeholder:"Periodicite / frequence",style:fs});
+  const iDom=el("input",{type:"text",placeholder:"Domaine (agrement, LBC-FT...)",style:fs});
+  const iAuth=el("input",{type:"text",placeholder:"Autorite emettrice",style:fs});
+  const iCrit=el("select",{style:fs});["critique","haute","normale"].forEach(v=>iCrit.appendChild(el("option",{value:v},v)));iCrit.value="haute";
+  const iSanc=el("input",{type:"text",placeholder:"Sanction en cas de manquement",style:fs});
+  const iDest=el("input",{type:"text",placeholder:"Destinataire (COSUMAF, interne...)",style:fs});
+  const iCont=el("select",{style:fs});[["recurrent","Recurrent (societe)"],["operation","Operation (deal)"]].forEach(([v,l])=>iCont.appendChild(el("option",{value:v},l)));
+  const iSrc=el("input",{type:"text",placeholder:"Sources requises (separees par des virgules)",style:fs});
+  grid.appendChild(fld("Intitule",iName));grid.appendChild(fld("Type",iKind));grid.appendChild(fld("Declencheur",iDecl));
+  const fe=fld("Evenement",iEvt);fe.appendChild(iNew);grid.appendChild(fe);
+  grid.appendChild(fld("Periodicite",iPeri));grid.appendChild(fld("Domaine",iDom));grid.appendChild(fld("Autorite",iAuth));
+  grid.appendChild(fld("Criticite",iCrit));grid.appendChild(fld("Sanction",iSanc));grid.appendChild(fld("Destinataire",iDest));
+  grid.appendChild(fld("Contenant",iCont));grid.appendChild(fld("Sources requises",iSrc));
+  card.appendChild(grid);
+  const addB=el("button",{class:"btn primary",style:"margin-top:10px"},"Ajouter l'obligation");
+  const st=el("span",{class:"cap",style:"padding:0;margin-left:8px"},"");
+  const rowb=el("div",{style:"margin-top:8px"});rowb.appendChild(addB);rowb.appendChild(st);card.appendChild(rowb);
+  addB.onclick=()=>{const nm=iName.value.trim();if(!nm){st.textContent="Donnez un intitule.";return;}
+    let evt=iEvt.value;if(evt==="__new__"){evt=iNew.value.trim();if(!evt){st.textContent="Nommez le nouvel evenement.";return;}}
+    const dest=iDest.value.trim();const nd=/cosumaf|bvmac|client|marche|regulateur/i.test(dest)?"externe":(dest?"interne":"externe");
+    const srcs=iSrc.value.split(",").map(s=>s.trim()).filter(Boolean).map(s=>({info:s,portee:/depositaire|commissaire|cac|bvmac|cosumaf|marche|tiers|externe/i.test(s)?"externe":"interne"}));
+    const a={entite:refEnt,id:"ADD-"+Date.now(),intitule:nm,kind:iKind.value,declencheur:iDecl.value,evenement:evt,
+      periodicite:iPeri.value.trim(),domain:iDom.value.trim(),authority:iAuth.value.trim(),criticite:iCrit.value,
+      crit:iSanc.value.trim()||iCrit.value,destinataire:dest,nature_dest:nd,contenant:iCont.value,sources:srcs,ts:Date.now()};
+    const arr=loadAjouts();arr.unshift(a);saveAjouts(arr);st.textContent="Obligation ajoutee au kanban de l'evenement.";draw();};
+  return card;
+}
+
+// Exports : la revue (CSV a partager) et tout (JSON : revue + ajouts + templates).
+function exportRevueCSV(){
+  const rev=loadRev();const rows=Object.values(rev);
+  if(!rows.length){alert("Aucune revue a telecharger. Validez/rejetez des obligations d'abord.");return;}
+  const esc=s=>'"'+String(s==null?"":s).replace(/"/g,'""')+'"';
+  const head=["date","entite","evenement","obligation_id","obligation","type","verdict","appreciation"];
+  const lines=rows.map(r=>[new Date(r.ts).toISOString(),r.entite,r.event,r.id,r.name,r.kind,r.verdict,r.appreciation].map(esc).join(","));
+  dlFile("revue-pilotis-"+new Date().toISOString().slice(0,10)+".csv",head.map(esc).join(",")+"\n"+lines.join("\n"),"text/csv;charset=utf-8");
+}
+function exportRevueJSON(){
+  const out={revue:loadRev(),ajouts:loadAjouts(),templates:loadTpl(),export_le:new Date().toISOString()};
+  dlFile("pilotis-specifications-"+new Date().toISOString().slice(0,10)+".json",JSON.stringify(out,null,2),"application/json");
+}
+
 function parcoursView(){
   const wrap=el("div");
   const card=el("div",{class:"card"});
@@ -471,9 +731,18 @@ function parcoursView(){
     dr.innerHTML=h; dr.querySelector(".dclose").onclick=closeDrawer;
     dr.classList.add("on"); ov.classList.add("on");
   }
+  // Routage ORTHOGONAL : un seul angle droit par arete (oriente par l'axe
+  // dominant), pas de diagonale croisee. Le paquet suit la meme polyligne.
+  function orthoPts(A,B){
+    if(Math.abs(B.x-A.x)>=Math.abs(B.y-A.y))return [[A.x,A.y],[B.x,A.y],[B.x,B.y]];
+    return [[A.x,A.y],[A.x,B.y],[B.x,B.y]];
+  }
+  function orthoPath(A,B){return "M "+orthoPts(A,B).map(q=>q[0]+" "+q[1]).join(" L ");}
+  function ptAt(pts,f){let seg=[],tot=0;for(let i=0;i<pts.length-1;i++){const d=Math.hypot(pts[i+1][0]-pts[i][0],pts[i+1][1]-pts[i][1]);seg.push(d);tot+=d;}
+    let dist=f*tot;for(let i=0;i<seg.length;i++){if(dist<=seg[i]||i===seg.length-1){const t=seg[i]?dist/seg[i]:0;return [pts[i][0]+(pts[i+1][0]-pts[i][0])*t,pts[i][1]+(pts[i+1][1]-pts[i][1])*t];}dist-=seg[i];}return pts[pts.length-1];}
   // svg
   let svg='<svg class="pk-svg" viewBox="0 0 1000 580" preserveAspectRatio="xMidYMid meet">'; const seen={};
-  SCEN.forEach(s=>s.hops.forEach(([a,b])=>{if(a===b)return;const k=a+"_"+b,k2=b+"_"+a;if(seen[k]||seen[k2])return;seen[k]=1;const A=PK_NODES[a],B=PK_NODES[b];svg+='<line class="pk-edge" id="e_'+k+'" x1="'+A.x+'" y1="'+A.y+'" x2="'+B.x+'" y2="'+B.y+'"/>';}));
+  SCEN.forEach(s=>s.hops.forEach(([a,b])=>{if(a===b)return;const k=a+"_"+b,k2=b+"_"+a;if(seen[k]||seen[k2])return;seen[k]=1;const A=PK_NODES[a],B=PK_NODES[b];svg+='<path class="pk-edge" id="e_'+k+'" d="'+orthoPath(A,B)+'"/>';}));
   Object.entries(PK_NODES).forEach(([k,n],i)=>{const x=n.x-n.w/2,y=n.y-n.h/2;const bx=x+22,by=y+21;
     svg+='<g class="pk-node" id="n_'+k+'" style="animation-delay:'+(i*80)+'ms">'
       +'<rect x="'+x+'" y="'+y+'" width="'+n.w+'" height="'+n.h+'" rx="16" fill="var(--surface)" stroke="'+n.c+'" stroke-width="1.8"/>'
@@ -509,8 +778,8 @@ function parcoursView(){
     h+='<div class="dossier-ref"><b>'+clean(d.ref)+'</b> - '+clean(d.cartouche)+'</div><div class="constats">';
     d.constats.forEach(cs=>{const bcl=cs.blocking?"#DC7E7E":"#5AB6E0";h+='<div class="cst"><div class="top"><span>'+clean(cs.obligation)+' <span class="badge" style="background:'+bcl+'22;color:'+bcl+'">'+(cs.blocking?"bloquant":"livrable")+'</span></span><span class="badge" style="background:'+col+'22;color:'+col+'">'+st+'</span></div><div class="cbar"><i data-w="'+pct+'" style="background:'+col+'"></i></div></div>';});
     h+='</div>';dp.innerHTML=h;requestAnimationFrame(()=>requestAnimationFrame(()=>dp.querySelectorAll('.cbar>i[data-w]').forEach(x=>x.style.width=x.getAttribute('data-w')+'%')));}
-  function move(A,B,col,done){const dur=900*mul(),t0=performance.now();pk.setAttribute("fill",col);pk.setAttribute("opacity","1");
-    (function s(t){if(cancelled)return;const p=Math.min(1,(t-t0)/dur),e=ease(p);pk.setAttribute("cx",A.x+(B.x-A.x)*e);pk.setAttribute("cy",A.y+(B.y-A.y)*e);if(p<1)requestAnimationFrame(s);else{pk.setAttribute("opacity","0");done&&done();}})(t0);}
+  function move(A,B,col,done){const pts=orthoPts(A,B);const dur=900*mul(),t0=performance.now();pk.setAttribute("fill",col);pk.setAttribute("opacity","1");
+    (function s(t){if(cancelled)return;const p=Math.min(1,(t-t0)/dur),e=ease(p);const q=ptAt(pts,e);pk.setAttribute("cx",q[0]);pk.setAttribute("cy",q[1]);if(p<1)requestAnimationFrame(s);else{pk.setAttribute("opacity","0");done&&done();}})(t0);}
   function setCap(idx,type,note,rf,ag){const D=DETAIL[type]||{};const tt=(PK_TYPE[type]||[CO.grey,type,"file"]);const col=tt[0];
     let chips='<span class="cchip" style="background:'+col+'22;color:'+col+'">'+ico(tt[2])+'<span>'+clean(tt[1])+'</span></span>';
     if(D.acteur)chips+='<span class="cchip act">'+ico("user")+'<span>'+clean(D.acteur.split(' - ')[0].split(' (')[0])+'</span></span>';
@@ -1033,11 +1302,8 @@ function instanciationView(){
 
 function draw(){clearTimers();hideInfo();const m=document.getElementById('main');m.innerHTML="";
   let v;
-  if(view==="instanciation")v=instanciationView();
-  else if(view==="parcours")v=parcoursView();
-  else if(view==="recurrent")v=recurrentView();
-  else if(view==="alertes")v=alertesView();
-  else v=feedbackView();
+  if(view==="parcours")v=parcoursView();
+  else v=referentielView();
   m.appendChild(v);}
 function syncTabs(){document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on',x.getAttribute('data-v')===view));}
 syncTabs();
