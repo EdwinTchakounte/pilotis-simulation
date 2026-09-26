@@ -38,6 +38,14 @@
   .tabs button.on{background:var(--navy);color:#fff;border-color:var(--navy)}
   a.dl{color:var(--blue);text-decoration:none;font-weight:700}
   .empty{color:var(--mute);text-align:center;padding:30px}
+  .mini{border:1px solid var(--line);border-radius:8px;padding:4px 10px;font-size:12px;font-weight:700;cursor:pointer;background:var(--surface);color:var(--ink);margin-right:6px}
+  .mini.p{border-color:var(--blue);color:var(--blue)}
+  .ov{position:fixed;inset:0;background:rgba(20,26,38,.55);display:none;z-index:50}
+  .ov.on{display:block}
+  .modal{position:fixed;top:4vh;left:50%;transform:translateX(-50%);width:min(900px,94vw);height:88vh;background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);display:none;z-index:51;flex-direction:column;overflow:hidden}
+  .modal.on{display:flex}
+  .modal .mh{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line)}
+  .modal iframe{flex:1;border:0;width:100%;background:#fff}
 </style>
 </head>
 <body>
@@ -83,12 +91,24 @@
   </div>
 </main>
 
+<div class="ov" id="ov"></div>
+<div class="modal" id="modal">
+  <div class="mh"><b id="mtitle">Apercu</b><div><a class="mini p" id="mdl" target="_blank">Telecharger</a><button class="mini" id="mclose">Fermer</button></div></div>
+  <iframe id="mframe" title="apercu"></iframe>
+</div>
+
 <script>
 "use strict";
 const CO={valide:"#46A873",rejete:"#DC7E7E","":"#9AA6BC"};
 const el=(t,a={},h)=>{const e=document.createElement(t);for(const k in a){if(k==="class")e.className=a[k];else if(k==="html")e.innerHTML=a[k];else e.setAttribute(k,a[k]);}if(h!=null)e.textContent=h;return e;};
 const clean=s=>(s==null?"":String(s));
 const $=id=>document.getElementById(id);
+function fmtSize(b){b=b||0;return b<1024?b+" o":(b<1048576?(b/1024).toFixed(0)+" Ko":(b/1048576).toFixed(1)+" Mo");}
+function contentUrl(key,dl){return data._base+"/templates/content?key="+encodeURIComponent(key)+(dl?"&download=1":"");}
+function viewUrl(x){if(x.dataUrl)return x.dataUrl;if(x.key&&data._base)return contentUrl(x.key,false);return "";}
+function downUrl(x){if(x.dataUrl)return x.dataUrl;if(x.key&&data._base)return contentUrl(x.key,true);return "";}
+function openPreview(title,view,down){$("mtitle").textContent=title||"Apercu";$("mframe").src=view;$("mdl").href=down||view;$("ov").classList.add("on");$("modal").classList.add("on");}
+function closePreview(){$("modal").classList.remove("on");$("ov").classList.remove("on");$("mframe").src="about:blank";}
 let view="reviews";
 let data={reviews:[],obligations:[],templates:[]};
 
@@ -110,13 +130,14 @@ async function load(){
   if(base){
     try{
       const q=ent?("?entite="+encodeURIComponent(ent)):"";
-      const [rv,ob]=await Promise.all([
+      const [rv,ob,tp]=await Promise.all([
         fetch(base+"/reviews"+q).then(r=>r.json()),
         fetch(base+"/obligations"+q).then(r=>r.json()),
+        fetch(base+"/templates/all"+q).then(r=>r.json()).catch(()=>[]),
       ]);
       data.reviews=Array.isArray(rv)?rv:[];
       data.obligations=Array.isArray(ob)?ob:[];
-      data.templates=[]; // listes de templates : chargees a la demande par obligation (endpoint /templates)
+      data.templates=Array.isArray(tp)?tp:[];
       data._base=base;
       $("status").textContent="Charge depuis le backend ("+data.reviews.length+" revues).";
     }catch(e){$("status").textContent="Backend injoignable : "+e.message+" - repli local.";localMode(ent);}
@@ -169,15 +190,23 @@ function render(){
       tb.appendChild(tr);});
     t.appendChild(tb);body.appendChild(t);
   }else{
-    if(!data.templates.length){body.innerHTML='<div class="empty">Aucun template (en mode backend, ouvrez une obligation pour lister ses templates).</div>';return;}
-    const t=el("table");t.innerHTML='<thead><tr><th>Obligation</th><th>#</th><th>Nom</th><th>Nomenclature</th><th></th></tr></thead>';
+    if(!data.templates.length){body.innerHTML='<div class="empty">Aucun template charge.</div>';return;}
+    const t=el("table");t.innerHTML='<thead><tr><th>Obligation</th><th>#</th><th>Nom</th><th>Fichier</th><th>Taille</th><th>Actions</th></tr></thead>';
     const tb=el("tbody");
-    data.templates.forEach(x=>{const tr=el("tr");
-      let dl="";
-      if(x.dataUrl)dl='<a class="dl" href="'+x.dataUrl+'" download="'+(x.filename||x.obligation_id+'_tpl_'+x.n)+'">Telecharger</a>';
-      else if(x.key&&data._base)dl='<a class="dl" href="'+data._base+'/templates/content?key='+encodeURIComponent(x.key)+'" target="_blank">Ouvrir</a>';
-      tr.innerHTML='<td><b>'+clean(x.obligation_id)+'</b></td><td>'+clean(x.n)+'</td><td>'+clean(x.name)+'</td><td class="cap">'+clean(x.nomenclature||x.key||"")+'</td><td>'+dl+'</td>';
-      tb.appendChild(tr);});
+    data.templates.forEach(x=>{
+      const tr=el("tr");
+      const view=viewUrl(x), down=downUrl(x);
+      const c1=el("td",{html:'<b>'+clean(x.obligation_id)+'</b>'});
+      const c2=el("td",{},String(x.n||""));
+      const c3=el("td",{html:clean(x.name)+'<div class="cap">'+clean(x.nomenclature||x.key||"")+'</div>'});
+      const c4=el("td",{},clean(x.filename||"-"));
+      const c5=el("td",{},fmtSize(x.size||0));
+      const c6=el("td");
+      if(view){const b=el("button",{class:"mini p"},"Previsualiser");b.onclick=()=>openPreview(clean(x.name),view,down);c6.appendChild(b);}
+      if(down){const a=el("a",{class:"mini",href:down,download:(x.filename||x.obligation_id+'_tpl_'+x.n)},"Telecharger");c6.appendChild(a);}
+      tr.appendChild(c1);tr.appendChild(c2);tr.appendChild(c3);tr.appendChild(c4);tr.appendChild(c5);tr.appendChild(c6);
+      tb.appendChild(tr);
+    });
     t.appendChild(tb);body.appendChild(t);
   }
 }
@@ -193,6 +222,8 @@ $("json").onclick=()=>dl("retours-experts-"+new Date().toISOString().slice(0,10)
 document.querySelectorAll("#tabs button").forEach(b=>b.onclick=()=>{document.querySelectorAll("#tabs button").forEach(x=>x.classList.remove("on"));b.classList.add("on");view=b.getAttribute("data-v");render();});
 $("load").onclick=load;
 $("ent").onchange=load;
+$("mclose").onclick=closePreview;
+$("ov").onclick=closePreview;
 load();
 </script>
 </body>
