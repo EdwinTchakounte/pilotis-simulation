@@ -691,6 +691,74 @@ function exportRevueJSON(){
   dlFile("pilotis-specifications-"+new Date().toISOString().slice(0,10)+".json",JSON.stringify(out,null,2),"application/json");
 }
 
+/* ============================================================================
+   ONGLET 2 : SIMULATION = kanban des obligations avec DEPENDANCES (enchainement)
+   tracees visuellement, puis la topologie des acteurs (parcours).
+   ============================================================================ */
+function buildEvents(ent){
+  const E=[{key:"instance",label:"Creation d'instance (socle recurrent)",col:CO.navy,
+    obl:BC.filter(o=>o.entite===ent).map(_normBC)}];
+  const cart=(DATA.referential&&DATA.referential.cartouches)||{};
+  [["entree-en-relation","Entree en relation (KYC)"],["operation-significative","Operation significative / ordre"],["introduction-en-bourse","Introduction en bourse (IPO)"]].forEach(([k,lab])=>{
+    const its=cart[k]||[];if(its.length)E.push({key:k,label:lab,col:CO.violet,obl:its.map((it,i)=>_normCart(it,i,k,lab))});});
+  return E;
+}
+function colByDecl(o){return (typeof DECL!=="undefined"&&DECL[o.declencheur])?DECL[o.declencheur][1]:CO.grey;}
+let depSel="introduction-en-bourse";
+
+function dependencesSection(){
+  const card=el("div",{class:"card"});
+  card.appendChild(el("h2",{style:"margin:0 0 2px;font-size:18px;font-weight:800"},"Obligations & dependances (kanban du flux)"));
+  card.appendChild(el("p",{class:"cap",style:"margin:0 0 10px;padding:0"},
+    "Les obligations d'un evenement, dans l'ordre du flux, avec leurs DEPENDANCES tracees (l'enchainement : ce qui doit preceder). Cliquez une carte pour le descriptif et la revue."));
+  const E=buildEvents(refEnt);
+  if(!E.find(x=>x.key===depSel))depSel=E[0].key;
+  const seg=el("div",{style:"display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px"});
+  E.forEach(ev=>{const on=ev.key===depSel;
+    const b=el("button",{style:"border:1px solid "+ev.col+";border-radius:999px;padding:5px 12px;font-size:12px;font-weight:700;cursor:pointer;background:"+(on?ev.col:"transparent")+";color:"+(on?"#fff":ev.col)},clean(ev.label)+" ("+ev.obl.length+")");
+    b.onclick=()=>{depSel=ev.key;draw();};seg.appendChild(b);});
+  card.appendChild(seg);
+  const boardWrap=el("div",{style:"position:relative"});
+  card.appendChild(boardWrap);
+  const ev=E.find(x=>x.key===depSel)||E[0];
+  const nodes=[];
+  const svgNS="http://www.w3.org/2000/svg";
+  const svg=document.createElementNS(svgNS,"svg");
+  svg.setAttribute("style","position:absolute;left:0;top:0;width:100%;height:100%;pointer-events:none;z-index:0;overflow:visible");
+  const grid=el("div",{style:"display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:26px 30px;position:relative;z-index:1"});
+  ev.obl.forEach((o,i)=>{const c=el("div",{style:"border:1px solid var(--line);border-left:4px solid "+colByDecl(o)+";border-radius:12px;padding:10px 12px;background:var(--surface);box-shadow:var(--shadow);cursor:pointer"});
+    c.appendChild(el("div",{style:"display:flex;justify-content:space-between;align-items:center",html:'<span style="font-size:9px;font-weight:800;color:var(--mute);letter-spacing:.5px">ETAPE '+(i+1)+'</span>'}));
+    c.lastChild.appendChild(el("span",{style:"font-size:9px;font-weight:800;color:"+colByDecl(o)},(DECL[o.declencheur]||["",""])[0]||""));
+    c.appendChild(el("div",{style:"font-size:12px;font-weight:600;color:var(--ink);margin-top:4px;line-height:1.3"},cut(o.name,84)));
+    c.onclick=()=>showObligation(o);grid.appendChild(c);nodes.push(c);});
+  boardWrap.appendChild(svg);boardWrap.appendChild(grid);
+  // trace des dependances (enchainement ob[i]->ob[i+1]) apres la mise en page.
+  function drawDeps(){
+    const bw=boardWrap.getBoundingClientRect();if(!bw.width){return;}
+    let inner='<defs><marker id="arh" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="'+CO.grey+'"/></marker></defs>';
+    for(let i=0;i<nodes.length-1;i++){
+      const a=nodes[i].getBoundingClientRect(),b=nodes[i+1].getBoundingClientRect();
+      const sameRow=Math.abs(b.top-a.top)<10;
+      let d;
+      if(sameRow){const ax=a.right-bw.left,ay=a.top-bw.top+a.height/2,bx=b.left-bw.left,by=b.top-bw.top+b.height/2;const mx=(ax+bx)/2;d='M '+ax+' '+ay+' L '+mx+' '+ay+' L '+mx+' '+by+' L '+bx+' '+by;}
+      else{const ax=a.left-bw.left+a.width/2,ay=a.bottom-bw.top,bx=b.left-bw.left+b.width/2,by=b.top-bw.top;const my=(ay+by)/2;d='M '+ax+' '+ay+' L '+ax+' '+my+' L '+bx+' '+my+' L '+bx+' '+by;}
+      inner+='<path d="'+d+'" fill="none" stroke="'+CO.grey+'" stroke-width="1.6" marker-end="url(#arh)"/>';
+    }
+    svg.innerHTML=inner;
+  }
+  requestAnimationFrame(()=>requestAnimationFrame(drawDeps));
+  const onR=()=>drawDeps();window.addEventListener("resize",onR);stopFns.push(()=>window.removeEventListener("resize",onR));
+  card.appendChild(el("div",{class:"cap",style:"margin-top:10px;padding:0;font-size:11px"},"Les fleches montrent l'enchainement (dependance d'ordre) des obligations de l'evenement. Couleur = declencheur."));
+  return card;
+}
+
+function simulationView(){
+  const wrap=el("div");
+  wrap.appendChild(dependencesSection());
+  wrap.appendChild(parcoursView());
+  return wrap;
+}
+
 function parcoursView(){
   const wrap=el("div");
   const card=el("div",{class:"card"});
@@ -1321,7 +1389,7 @@ function instanciationView(){
 
 function draw(){clearTimers();hideInfo();const m=document.getElementById('main');m.innerHTML="";
   let v;
-  if(view==="parcours")v=parcoursView();
+  if(view==="parcours")v=simulationView();
   else v=referentielView();
   m.appendChild(v);}
 function syncTabs(){document.querySelectorAll('#tabs button').forEach(x=>x.classList.toggle('on',x.getAttribute('data-v')===view));}
