@@ -304,7 +304,7 @@ function saveTpl(t){try{localStorage.setItem(TPL_KEY,JSON.stringify(t));}catch(e
 function dlFile(name,txt,mime){const b=new Blob([txt],{type:mime});const u=URL.createObjectURL(b);const a=el("a",{href:u,download:name});document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1500);}
 // helpers templates (partages drawer + section)
 function tplExt(fn){const m=/\.([a-z0-9]+)$/i.exec(fn||"");return m?m[1].toLowerCase():"txt";}
-function tplNomencl(repId,n,e){return "reportings/"+repId+"/"+repId+"__tpl_"+n+"."+(e||"txt");}
+function tplNomencl(repId,n,e,folder){return (folder||"reportings")+"/"+repId+"/"+repId+"__tpl_"+n+"."+(e||"txt");}
 function fmtSize(b){b=b||0;return b<1024?b+" o":(b<1048576?(b/1024).toFixed(0)+" Ko":(b/1048576).toFixed(1)+" Mo");}
 
 // Drawer descriptif + REVUE (valider / rejeter / appreciation) d'une obligation.
@@ -321,17 +321,17 @@ function showObligation(o){
   h+='<textarea id="rvappr" placeholder="Appreciation, correction, precision, ou ce qui manque..." style="width:100%;min-height:76px;border:1px solid var(--line);border-radius:10px;padding:8px;font-size:13px;background:var(--surface);color:var(--ink);box-sizing:border-box">'+clean(rv.appreciation||"")+'</textarea>';
   h+='<button id="rvsave" class="btn primary" style="margin-top:8px">Enregistrer la revue</button>';
   h+='<span id="rvst" class="cap" style="padding:0;margin-left:8px"></span></div>';
-  // Pour un REPORTING : upload de DOCUMENTS templates rattaches a CE reporting,
+  // Upload de DOCUMENTS templates rattaches a CETTE obligation (chaque cas),
   // plusieurs exemples admis, directement dans le drawer.
   const isRep=o.kind==="Reporting";
-  if(isRep){
-    h+='<div class="dsec"><h4>Templates de ce reporting</h4>';
-    h+='<p class="cap" style="padding:0;margin:0 0 8px">Chargez un ou plusieurs DOCUMENTS (Word, PDF, Excel, texte...). Plusieurs exemples admis. Nomenclature : reportings/'+o.id+'/'+o.id+'__tpl_N.ext</p>';
-    h+='<input type="file" id="tplfile" style="font-size:12px;display:block;margin-bottom:6px">';
-    h+='<input type="text" id="tplname" placeholder="Nom du template (ex: modele COSUMAF v1)" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:10px;padding:7px 9px;font-size:12.5px;background:var(--surface);color:var(--ink)">';
-    h+='<button id="tpladd" class="btn primary" style="margin-top:8px">Ajouter le template</button> <span id="tplst" class="cap" style="padding:0"></span>';
-    h+='<div id="tplbox" style="margin-top:10px;display:flex;flex-direction:column;gap:6px"></div></div>';
-  }
+  const tplFolder=isRep?"reportings":"obligations";
+  const tplTitle=isRep?"Templates de ce reporting":"Documents / templates rattaches";
+  h+='<div class="dsec"><h4>'+tplTitle+'</h4>';
+  h+='<p class="cap" style="padding:0;margin:0 0 8px">Chargez un ou plusieurs DOCUMENTS (Word, PDF, Excel, texte...). Plusieurs exemples admis. Nomenclature : '+tplFolder+'/'+o.id+'/'+o.id+'__tpl_N.ext</p>';
+  h+='<input type="file" id="tplfile" style="font-size:12px;display:block;margin-bottom:6px">';
+  h+='<input type="text" id="tplname" placeholder="Nom du template (ex: modele COSUMAF v1)" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:10px;padding:7px 9px;font-size:12.5px;background:var(--surface);color:var(--ink)">';
+  h+='<button id="tpladd" class="btn primary" style="margin-top:8px">Ajouter le template</button> <span id="tplst" class="cap" style="padding:0"></span>';
+  h+='<div id="tplbox" style="margin-top:10px;display:flex;flex-direction:column;gap:6px"></div></div>';
   showInfo(h);
   let verdict=rv.verdict||"";
   _idr.querySelectorAll(".rvb").forEach(b=>b.onclick=()=>{verdict=b.getAttribute("data-k");
@@ -339,7 +339,7 @@ function showObligation(o){
   _idr.querySelector("#rvsave").onclick=()=>{const r=loadRev();
     r[o.id]={id:o.id,name:o.name,event:o.event||"",entite:o.entite||"",kind:o.kind||"",verdict:verdict,appreciation:_idr.querySelector("#rvappr").value.trim(),ts:Date.now()};
     saveRev(r);hideInfo();draw();};
-  if(isRep){
+  {
     const box=_idr.querySelector("#tplbox"),fileI=_idr.querySelector("#tplfile"),nameI=_idr.querySelector("#tplname"),st=_idr.querySelector("#tplst");
     const MAXB=1.4*1024*1024;
     function renderBox(){box.innerHTML="";const arr=(loadTpl()[o.id]||[]);
@@ -354,7 +354,7 @@ function showObligation(o){
         acts.appendChild(br);it.appendChild(acts);box.appendChild(it);});
     }
     renderBox();
-    function commit(entry){const t=loadTpl();const arr=t[o.id]||[];const n=arr.length+1;entry.n=n;entry.nomenclature=tplNomencl(o.id,n,entry.ext);entry.ts=Date.now();arr.push(entry);t[o.id]=arr;
+    function commit(entry){const t=loadTpl();const arr=t[o.id]||[];const n=arr.length+1;entry.n=n;entry.nomenclature=tplNomencl(o.id,n,entry.ext,tplFolder);entry.ts=Date.now();arr.push(entry);t[o.id]=arr;
       try{saveTpl(t);}catch(e){st.textContent="Stockage local plein.";return;}fileI.value="";nameI.value="";st.textContent="Exemple "+n+" ajoute.";renderBox();}
     _idr.querySelector("#tpladd").onclick=()=>{const f=fileI.files&&fileI.files[0];const nm=nameI.value.trim()||(f?f.name:"template");
       if(f){const e=tplExt(f.name);if(f.size>MAXB){commit({name:nm,filename:f.name,mime:f.type,size:f.size,ext:e,stored:false});return;}
@@ -553,7 +553,7 @@ function referentielView(){
     head.appendChild(el("h3",{style:"margin:0;font-size:15px;font-weight:800;color:"+ev.col,html:'<span style="display:inline-flex;vertical-align:-3px;margin-right:6px">'+ico("play")+'</span>'+clean(ev.label)}));
     head.appendChild(el("span",{class:"lg"},ev.obl.length+" obligation(s)"));
     sec.appendChild(head);
-    sec.appendChild(el("p",{class:"cap",style:"margin:2px 0 10px;padding:0"},ev.hint+" Cliquez une carte pour le descriptif et la revue."));
+    sec.appendChild(el("p",{class:"cap",style:"margin:2px 0 10px;padding:0"},ev.hint+" Cliquez une carte : descriptif, revue (valider/rejeter) et upload de templates."));
     // kanban : 5 colonnes, cartes distribuees le long du flux (positions illustratives)
     const board=el("div",{style:"display:grid;grid-template-columns:repeat("+KAN.length+",1fr);gap:8px"});
     const cols={}; KAN.forEach(([k,lab,c])=>{
