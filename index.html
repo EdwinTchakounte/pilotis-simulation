@@ -302,6 +302,10 @@ function saveAjouts(a){try{localStorage.setItem(AJOUT_KEY,JSON.stringify(a));}ca
 function loadTpl(){try{return JSON.parse(localStorage.getItem(TPL_KEY)||"{}");}catch(e){return {};}}
 function saveTpl(t){try{localStorage.setItem(TPL_KEY,JSON.stringify(t));}catch(e){}}
 function dlFile(name,txt,mime){const b=new Blob([txt],{type:mime});const u=URL.createObjectURL(b);const a=el("a",{href:u,download:name});document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1500);}
+// helpers templates (partages drawer + section)
+function tplExt(fn){const m=/\.([a-z0-9]+)$/i.exec(fn||"");return m?m[1].toLowerCase():"txt";}
+function tplNomencl(repId,n,e){return "reportings/"+repId+"/"+repId+"__tpl_"+n+"."+(e||"txt");}
+function fmtSize(b){b=b||0;return b<1024?b+" o":(b<1048576?(b/1024).toFixed(0)+" Ko":(b/1048576).toFixed(1)+" Mo");}
 
 // Drawer descriptif + REVUE (valider / rejeter / appreciation) d'une obligation.
 function showObligation(o){
@@ -317,6 +321,17 @@ function showObligation(o){
   h+='<textarea id="rvappr" placeholder="Appreciation, correction, precision, ou ce qui manque..." style="width:100%;min-height:76px;border:1px solid var(--line);border-radius:10px;padding:8px;font-size:13px;background:var(--surface);color:var(--ink);box-sizing:border-box">'+clean(rv.appreciation||"")+'</textarea>';
   h+='<button id="rvsave" class="btn primary" style="margin-top:8px">Enregistrer la revue</button>';
   h+='<span id="rvst" class="cap" style="padding:0;margin-left:8px"></span></div>';
+  // Pour un REPORTING : upload de DOCUMENTS templates rattaches a CE reporting,
+  // plusieurs exemples admis, directement dans le drawer.
+  const isRep=o.kind==="Reporting";
+  if(isRep){
+    h+='<div class="dsec"><h4>Templates de ce reporting</h4>';
+    h+='<p class="cap" style="padding:0;margin:0 0 8px">Chargez un ou plusieurs DOCUMENTS (Word, PDF, Excel, texte...). Plusieurs exemples admis. Nomenclature : reportings/'+o.id+'/'+o.id+'__tpl_N.ext</p>';
+    h+='<input type="file" id="tplfile" style="font-size:12px;display:block;margin-bottom:6px">';
+    h+='<input type="text" id="tplname" placeholder="Nom du template (ex: modele COSUMAF v1)" style="width:100%;box-sizing:border-box;border:1px solid var(--line);border-radius:10px;padding:7px 9px;font-size:12.5px;background:var(--surface);color:var(--ink)">';
+    h+='<button id="tpladd" class="btn primary" style="margin-top:8px">Ajouter le template</button> <span id="tplst" class="cap" style="padding:0"></span>';
+    h+='<div id="tplbox" style="margin-top:10px;display:flex;flex-direction:column;gap:6px"></div></div>';
+  }
   showInfo(h);
   let verdict=rv.verdict||"";
   _idr.querySelectorAll(".rvb").forEach(b=>b.onclick=()=>{verdict=b.getAttribute("data-k");
@@ -324,6 +339,28 @@ function showObligation(o){
   _idr.querySelector("#rvsave").onclick=()=>{const r=loadRev();
     r[o.id]={id:o.id,name:o.name,event:o.event||"",entite:o.entite||"",kind:o.kind||"",verdict:verdict,appreciation:_idr.querySelector("#rvappr").value.trim(),ts:Date.now()};
     saveRev(r);hideInfo();draw();};
+  if(isRep){
+    const box=_idr.querySelector("#tplbox"),fileI=_idr.querySelector("#tplfile"),nameI=_idr.querySelector("#tplname"),st=_idr.querySelector("#tplst");
+    const MAXB=1.4*1024*1024;
+    function renderBox(){box.innerHTML="";const arr=(loadTpl()[o.id]||[]);
+      box.appendChild(el("div",{class:"cap",style:"padding:0;font-weight:700"},arr.length+" exemple(s) charge(s)"));
+      arr.forEach(x=>{const it=el("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:8px;border:1px solid var(--line);border-radius:10px;padding:7px 9px"});
+        const meta=x.filename?clean(x.filename)+" · "+fmtSize(x.size)+(x.stored?"":" (metadonnees seules)"):(x.content?x.content.length+" car.":"");
+        it.appendChild(el("div",{style:"min-width:0",html:'<div style="font-size:12px;font-weight:600;color:var(--ink)">'+x.n+' - '+clean(x.name)+'</div><div class="cap" style="padding:0;font-size:10.5px">'+clean(x.nomenclature)+'</div><div class="cap" style="padding:0;font-size:10.5px">'+meta+'</div>'}));
+        const acts=el("div",{style:"display:flex;gap:6px;flex-shrink:0"});
+        if(x.dataUrl){const a=el("a",{class:"btn ghost",href:x.dataUrl,download:x.filename||(o.id+"_tpl_"+x.n)});a.textContent="Telecharger";acts.appendChild(a);}
+        else if(x.content){const b=el("button",{class:"btn ghost"},"Telecharger");b.onclick=()=>dlFile(o.id+"__tpl_"+x.n+".txt",x.content,"text/plain;charset=utf-8");acts.appendChild(b);}
+        const br=el("button",{class:"btn ghost"},"Retirer");br.onclick=()=>{const t=loadTpl();t[o.id]=(t[o.id]||[]).filter(y=>y.n!==x.n);saveTpl(t);renderBox();};
+        acts.appendChild(br);it.appendChild(acts);box.appendChild(it);});
+    }
+    renderBox();
+    function commit(entry){const t=loadTpl();const arr=t[o.id]||[];const n=arr.length+1;entry.n=n;entry.nomenclature=tplNomencl(o.id,n,entry.ext);entry.ts=Date.now();arr.push(entry);t[o.id]=arr;
+      try{saveTpl(t);}catch(e){st.textContent="Stockage local plein.";return;}fileI.value="";nameI.value="";st.textContent="Exemple "+n+" ajoute.";renderBox();}
+    _idr.querySelector("#tpladd").onclick=()=>{const f=fileI.files&&fileI.files[0];const nm=nameI.value.trim()||(f?f.name:"template");
+      if(f){const e=tplExt(f.name);if(f.size>MAXB){commit({name:nm,filename:f.name,mime:f.type,size:f.size,ext:e,stored:false});return;}
+        const rd=new FileReader();rd.onload=()=>commit({name:nm,filename:f.name,mime:f.type,size:f.size,ext:e,dataUrl:String(rd.result||""),stored:true});rd.readAsDataURL(f);return;}
+      st.textContent="Choisissez un document.";};
+  }
 }
 
 // vitesse globale (1 lent .. 10 rapide) -> multiplicateur de duree
@@ -558,78 +595,18 @@ function referentielView(){
 // du front reel. La nomenclature affichee est celle qui serait utilisee serveur.
 function templatesSection(){
   const card=el("div",{class:"card",style:"border-left:4px solid "+CO.sky});
-  card.appendChild(el("h3",{style:"margin:0 0 2px;font-size:16px;font-weight:800",html:'<span style="display:inline-flex;vertical-align:-3px;margin-right:6px;color:'+CO.sky+'">'+ico("upload")+'</span>Templates de reporting (documents rattaches)'}));
-  card.appendChild(el("p",{class:"cap",style:"margin:2px 0 12px;padding:0"},
-    "Chargez le DOCUMENT template de chaque reporting (Word, PDF, Excel, texte...). Plusieurs exemples possibles, numerotes 1, 2, ... et nommes selon la nomenclature du reporting. Stockage MinIO cote serveur ; ici en local, telechargeables."));
-  const reps=BC.filter(o=>o.kind==="Reporting"&&o.entite===refEnt);
-  const MAXB=1.4*1024*1024;
-  function ext(fn){const m=/\.([a-z0-9]+)$/i.exec(fn||"");return m?m[1].toLowerCase():"txt";}
-  function nomencl(repId,n,e){return "reportings/"+repId+"/"+repId+"__tpl_"+n+"."+e;}
-  function fmtSize(b){return b<1024?b+" o":(b<1048576?(b/1024).toFixed(0)+" Ko":(b/1048576).toFixed(1)+" Mo");}
-
-  // Apercu par reporting : chaque reporting et son nombre de templates (cliquable).
-  const overview=el("div",{style:"display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px"});
-  const selRow=el("div",{style:"display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px"});
-  const selR=el("select",{style:"border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:13px;background:var(--surface);color:var(--ink);min-width:320px"});
-  reps.forEach(r=>selR.appendChild(el("option",{value:r.id},(r.id?r.id+" - ":"")+clean((r.name||"").slice(0,52)))));
-  selRow.appendChild(el("span",{class:"cap",style:"padding:0;font-weight:700"},"Reporting :"));selRow.appendChild(selR);
-  card.appendChild(overview);card.appendChild(selRow);
-
-  // Zone de depot (dropzone) + nom + texte optionnel.
-  const drop=el("label",{style:"display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;border:2px dashed var(--line);border-radius:14px;padding:18px;cursor:pointer;background:var(--surface);text-align:center"});
-  const fileI=el("input",{type:"file",style:"display:none"});
-  drop.appendChild(el("span",{style:"color:"+CO.sky+";display:inline-flex",html:ico("upload")}));
-  const dropTxt=el("span",{class:"cap",style:"padding:0;font-weight:700"},"Deposer un document template (ou cliquer) - Word, PDF, Excel, texte...");
-  const dropSub=el("span",{class:"cap",style:"padding:0;font-size:11px"},"Aucun fichier choisi");
-  drop.appendChild(dropTxt);drop.appendChild(dropSub);drop.appendChild(fileI);
-  let picked=null;
-  drop.ondragover=e=>{e.preventDefault();drop.style.borderColor=CO.sky;};
-  drop.ondragleave=()=>{drop.style.borderColor="var(--line)";};
-  drop.ondrop=e=>{e.preventDefault();drop.style.borderColor="var(--line)";const f=e.dataTransfer.files&&e.dataTransfer.files[0];if(f){picked=f;dropSub.textContent=f.name+" ("+fmtSize(f.size)+")";if(!nameI.value)nameI.value=f.name;}};
-  fileI.onchange=()=>{const f=fileI.files&&fileI.files[0];if(f){picked=f;dropSub.textContent=f.name+" ("+fmtSize(f.size)+")";if(!nameI.value)nameI.value=f.name;}};
-  card.appendChild(drop);
-  const nameI=el("input",{type:"text",placeholder:"Nom du template (ex: modele COSUMAF v1)",style:"border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:13px;background:var(--surface);color:var(--ink);width:100%;box-sizing:border-box;margin-top:10px"});
-  card.appendChild(nameI);
-  const ta=el("textarea",{placeholder:"Ou coller directement un contenu texte (optionnel, si pas de fichier)",style:"width:100%;min-height:70px;border:1px solid var(--line);border-radius:10px;padding:8px;font-size:12px;background:var(--surface);color:var(--ink);box-sizing:border-box;margin-top:8px"});
-  card.appendChild(ta);
-  const addB=el("button",{class:"btn primary",style:"margin-top:8px"},"Ajouter le template");
-  const st=el("span",{class:"cap",style:"padding:0;margin-left:8px"},"");
-  const rowb=el("div",{style:"margin-top:8px"});rowb.appendChild(addB);rowb.appendChild(st);card.appendChild(rowb);
-  const listWrap=el("div",{style:"display:flex;flex-direction:column;gap:6px;margin-top:12px"}); card.appendChild(listWrap);
-
-  function renderOverview(){overview.innerHTML="";const t=loadTpl();
-    reps.forEach(r=>{const c=(t[r.id]||[]).length;const on=r.id===selR.value;
-      const chip=el("button",{style:"border:1px solid "+(c?CO.sky:"var(--line)")+";border-radius:999px;padding:4px 10px;font-size:11px;cursor:pointer;background:"+(on?CO.sky:(c?CO.sky+"14":"transparent"))+";color:"+(on?"#fff":(c?CO.sky:"var(--mute)"))},r.id+" ("+c+")");
-      chip.onclick=()=>{selR.value=r.id;render();};overview.appendChild(chip);});
-  }
-  function render(){
-    renderOverview();
-    listWrap.innerHTML="";const t=loadTpl();const repId=selR.value;const arr=(t[repId]||[]);
-    listWrap.appendChild(el("div",{class:"cap",style:"padding:0;font-weight:700"},arr.length+" template(s) pour "+repId));
-    arr.forEach(x=>{
-      const it=el("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:10px;border:1px solid var(--line);border-radius:10px;padding:8px 10px"});
-      const meta=(x.filename?clean(x.filename)+" · "+fmtSize(x.size||0)+(x.stored?"":" (metadonnees seules - trop volumineux en local)"):(x.content?x.content.length+" caracteres":""));
-      it.appendChild(el("div",{style:"min-width:0",html:'<div style="font-size:12.5px;font-weight:600;color:var(--ink)">'+x.n+' - '+clean(x.name)+'</div><div class="cap" style="padding:0;font-size:11px">'+clean(x.nomenclature)+'</div><div class="cap" style="padding:0;font-size:11px">'+meta+'</div>'}));
-      const acts=el("div",{style:"display:flex;gap:6px;flex-shrink:0"});
-      if(x.dataUrl){const bd=el("a",{class:"btn ghost",href:x.dataUrl,download:(x.filename||repId+"_tpl_"+x.n)});bd.textContent="Telecharger";acts.appendChild(bd);}
-      else if(x.content){const bd=el("button",{class:"btn ghost"},"Telecharger");bd.onclick=()=>dlFile(repId+"__tpl_"+x.n+".txt",x.content,"text/plain;charset=utf-8");acts.appendChild(bd);}
-      const br=el("button",{class:"btn ghost"},"Retirer");br.onclick=()=>{const tt=loadTpl();tt[repId]=(tt[repId]||[]).filter(y=>y.n!==x.n);saveTpl(tt);render();};
-      acts.appendChild(br);it.appendChild(acts);listWrap.appendChild(it);
-    });
-  }
-  selR.onchange=render;
-  function commit(entry){const t=loadTpl();const repId=selR.value;const arr=t[repId]||[];const n=arr.length+1;
-    entry.n=n;entry.nomenclature=nomencl(repId,n,entry.ext||"txt");entry.ts=Date.now();
-    arr.push(entry);t[repId]=arr;try{saveTpl(t);}catch(e){st.textContent="Stockage local plein - reduisez la taille.";return;}
-    picked=null;fileI.value="";dropSub.textContent="Aucun fichier choisi";nameI.value="";ta.value="";
-    st.textContent="Template "+n+" ajoute ("+entry.nomenclature+").";render();}
-  addB.onclick=()=>{const repId=selR.value;const nm=nameI.value.trim()|| (picked?picked.name:"template");
-    if(picked){const f=picked;const e=ext(f.name);
-      if(f.size>MAXB){commit({name:nm,filename:f.name,mime:f.type,size:f.size,ext:e,stored:false});return;}
-      const rd=new FileReader();rd.onload=()=>commit({name:nm,filename:f.name,mime:f.type,size:f.size,ext:e,dataUrl:String(rd.result||""),stored:true});rd.readAsDataURL(f);return;}
-    const c=ta.value.trim();if(!c){st.textContent="Deposez un document ou collez un texte.";return;}
-    commit({name:nm,content:c.slice(0,20000),ext:"txt",size:c.length,stored:true});};
-  render();
+  card.appendChild(el("h3",{style:"margin:0 0 2px;font-size:16px;font-weight:800",html:'<span style="display:inline-flex;vertical-align:-3px;margin-right:6px;color:'+CO.sky+'">'+ico("upload")+'</span>Templates de reporting (par reporting)'}));
+  card.appendChild(el("p",{class:"cap",style:"margin:2px 0 12px;padding:0"},"Chaque reporting a SA zone d'upload : cliquez « Gerer les templates » (ou le reporting dans le kanban) pour charger un ou PLUSIEURS documents. Stockage MinIO cote serveur ; ici en local, telechargeables."));
+  const reps=BC.filter(o=>o.kind==="Reporting"&&o.entite===refEnt);const t=loadTpl();
+  const grid=el("div",{style:"display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:10px"});
+  reps.forEach(r=>{const n=(t[r.id]||[]).length;
+    const box=el("div",{style:"display:flex;justify-content:space-between;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--surface)"});
+    box.appendChild(el("div",{style:"min-width:0",html:'<div style="font-size:12.5px;font-weight:600;color:var(--ink)">'+clean(r.id)+'</div><div class="cap" style="padding:0;font-size:11px">'+cut(r.name,46)+'</div>'}));
+    const right=el("div",{style:"display:flex;align-items:center;gap:8px;flex-shrink:0"});
+    right.appendChild(el("span",{style:"font-size:10px;font-weight:800;border-radius:8px;padding:2px 7px;color:"+(n?CO.sky:"var(--mute)")+";background:"+(n?CO.sky+"1e":"var(--line)")},n+" tpl"));
+    const b=el("button",{class:"btn ghost"},"Gerer les templates");b.onclick=()=>showObligation(r);right.appendChild(b);
+    box.appendChild(right);grid.appendChild(box);});
+  card.appendChild(grid);
   return card;
 }
 
