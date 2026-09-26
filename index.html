@@ -324,7 +324,7 @@ function obligationInfoHtml(o){
   h+='<li>Criticite : '+clean(o.crit||"non precisee")+'</li>';
   if(o.destinataire)h+='<li>Destinataire : <b>'+clean(o.destinataire)+'</b>'+(o.nature_dest?' ('+clean(o.nature_dest)+')':'')+'</li>';
   h+='</ul></div>';
-  if(isAdd)h+='<div class="dnote">Ajoutee par l\'expert - telechargeable depuis l\'onglet Instanciation pour mettre a jour le referentiel.</div>';
+  if(isAdd)h+='<div class="dnote">Ajoutee par l\'expert - enregistree en base (MinIO) pour mettre a jour le referentiel.</div>';
   if(isRep&&o.sources&&o.sources.length){
     h+='<div class="dsec"><h4>Informations a rassembler pour la redaction</h4><ul class="dcasc">';
     o.sources.forEach(s=>{const ext=s.portee==="externe";const pc=ext?CO.amber:CO.teal;h+='<li>'+clean(s.info)+' <span class="badge" style="background:'+pc+'22;color:'+pc+'">'+(ext?"Externe":"Interne")+'</span></li>';});
@@ -355,7 +355,8 @@ function apiBase(){try{const u=new URLSearchParams(location.search).get("api");i
   if(!b && location.hostname.indexOf("simulation-pilotis.")===0)b="https://api."+location.hostname;
   return b;}catch(e){return "";}}
 function apiSetBase(u){try{localStorage.setItem("pilotis-api",(u||"").trim().replace(/\/+$/,""));}catch(e){}}
-function apiSendJSON(method,path,body){const b=apiBase();if(!b)return;try{fetch(b+path,{method:method,headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).catch(()=>{});}catch(e){}}
+// Renvoie une promesse : true si enregistre au backend, false si echec reseau, null si pas de backend configure.
+function apiSendJSON(method,path,body){const b=apiBase();if(!b)return Promise.resolve(null);try{return fetch(b+path,{method:method,headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).then(r=>!!r.ok).catch(()=>false);}catch(e){return Promise.resolve(false);}}
 function apiUpload(path,form){const b=apiBase();if(!b)return Promise.resolve(null);try{return fetch(b+path,{method:"POST",body:form}).then(r=>r.ok?r.json():null).catch(()=>null);}catch(e){return Promise.resolve(null);}}
 
 // Drawer descriptif + REVUE (valider / rejeter / appreciation) d'une obligation.
@@ -390,8 +391,16 @@ function showObligation(o){
   _idr.querySelector("#rvsave").onclick=()=>{const r=loadRev();const appr=_idr.querySelector("#rvappr").value.trim();
     r[o.id]={id:o.id,name:o.name,event:o.event||"",entite:o.entite||"",kind:o.kind||"",verdict:verdict,appreciation:appr,ts:Date.now()};
     saveRev(r);
-    apiSendJSON("PUT","/reviews",{entite:o.entite||"",obligation_id:o.id,name:o.name||"",verdict:verdict,appreciation:appr,kind:o.kind||"",event:o.event||""});
-    hideInfo();draw();};
+    // Sauvegarde en base (MinIO) avec confirmation : en cas d'echec on garde le drawer ouvert pour reessayer.
+    const stv=_idr.querySelector("#rvst");if(stv){stv.textContent="Enregistrement...";stv.style.color="";}
+    const btn=_idr.querySelector("#rvsave");btn.disabled=true;
+    Promise.resolve(apiSendJSON("PUT","/reviews",{entite:o.entite||"",obligation_id:o.id,name:o.name||"",verdict:verdict,appreciation:appr,kind:o.kind||"",event:o.event||""})).then(okv=>{
+      btn.disabled=false;
+      if(okv===false){if(stv){stv.textContent="Echec de l'enregistrement. Verifiez la connexion et reessayez.";stv.style.color=CO.red;}return;}
+      if(okv===null){if(stv){stv.textContent="Enregistre (local, backend non configure).";stv.style.color=CO.amber;}}
+      else{if(stv){stv.textContent="Enregistre.";stv.style.color=CO.green;}}
+      setTimeout(()=>{hideInfo();draw();},450);
+    });};
   {
     const box=_idr.querySelector("#tplbox"),fileI=_idr.querySelector("#tplfile"),nameI=_idr.querySelector("#tplname"),st=_idr.querySelector("#tplst");
     const MAXB=1.4*1024*1024;
@@ -411,10 +420,17 @@ function showObligation(o){
       try{saveTpl(t);}catch(e){st.textContent="Stockage local plein.";return;}fileI.value="";nameI.value="";st.textContent="Exemple "+n+" ajoute.";renderBox();}
     _idr.querySelector("#tpladd").onclick=()=>{const f=fileI.files&&fileI.files[0];const nm=nameI.value.trim()||(f?f.name:"template");
       if(f){const e=tplExt(f.name);
-        // envoi au backend (best-effort, stockage MinIO) en plus du local
-        const fd=new FormData();fd.append("file",f);fd.append("obligation_id",o.id);fd.append("folder",tplFolder);fd.append("name",nm);fd.append("entite",o.entite||"");apiUpload("/templates",fd);
-        if(f.size>MAXB){commit({name:nm,filename:f.name,mime:f.type,size:f.size,ext:e,stored:false});return;}
-        const rd=new FileReader();rd.onload=()=>commit({name:nm,filename:f.name,mime:f.type,size:f.size,ext:e,dataUrl:String(rd.result||""),stored:true});rd.readAsDataURL(f);return;}
+        // envoi au backend (stockage MinIO) avec confirmation, + apercu local
+        const fd=new FormData();fd.append("file",f);fd.append("obligation_id",o.id);fd.append("folder",tplFolder);fd.append("name",nm);fd.append("entite",o.entite||"");
+        st.textContent="Envoi du document...";st.style.color="";
+        const up=apiUpload("/templates",fd);
+        if(f.size>MAXB){commit({name:nm,filename:f.name,mime:f.type,size:f.size,ext:e,stored:false});}
+        else{const rd=new FileReader();rd.onload=()=>commit({name:nm,filename:f.name,mime:f.type,size:f.size,ext:e,dataUrl:String(rd.result||""),stored:true});rd.readAsDataURL(f);}
+        Promise.resolve(up).then(res=>{const nb=apiBase();
+          if(res){st.textContent="Document enregistre (serveur).";st.style.color=CO.green;}
+          else if(!nb){st.textContent="Ajoute en local (backend non configure).";st.style.color=CO.amber;}
+          else{st.textContent="Echec de l'envoi serveur ; reessayez.";st.style.color=CO.red;}});
+        return;}
       st.textContent="Choisissez un document.";};
   }
 }
@@ -547,7 +563,7 @@ const hByC=c=>DATA.handoffs.find(h=>h.contract===c);
    Listing des evenements declencheurs -> obligations jointes (kanban du flow par
    groupe), revue expert (valider/rejeter + appreciation), ajout d'obligation
    (champs base de connaissance), templates de reporting, alerting. Tout est
-   descriptif et telechargeable (CSV/JSON) pour partager les specifications.
+   descriptif ; tout ce que l'expert produit est enregistre en base (MinIO).
    ============================================================================ */
 let refEnt="Financia-Gestion";
 // Colonnes du flux (kanban), du declenchement au verdict humain.
@@ -569,7 +585,7 @@ function referentielView(){
   const hero=el("div",{class:"card",style:"border-top:3px solid "+CO.blue});
   hero.appendChild(el("h2",{style:"margin:0 0 2px;font-size:19px;font-weight:800"},"Referentiel & revue par evenement declencheur"));
   hero.appendChild(el("p",{class:"cap",style:"margin:0 0 12px;padding:0"},
-    "Chaque evenement declencheur et les obligations qu'il ouvre, en kanban. L'expert CHECKE : il valide/rejette, laisse une appreciation, ajoute ce qui manque - puis telecharge le retour (CSV) a partager."));
+    "Chaque evenement declencheur et les obligations qu'il ouvre, en kanban. L'expert CHECKE : il valide/rejette, laisse une appreciation, ajoute ce qui manque. Tout est enregistre en base automatiquement."));
   const bar=el("div",{style:"display:flex;gap:12px;align-items:center;flex-wrap:wrap"});
   const seg=el("div",{style:"display:inline-flex;gap:6px;background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:4px"});
   [["Financia-Gestion",CO.blue],["Financia-Bourse",CO.violet]].forEach(([lab,col])=>{
@@ -578,15 +594,10 @@ function referentielView(){
   bar.appendChild(el("span",{class:"cap",style:"padding:0;font-weight:700"},"Societe :"));
   bar.appendChild(seg);
   const nrev=Object.keys(rev).length;
-  const dlcsv=el("button",{class:"btn ghost"},"Telecharger la revue (CSV)");
-  const dljson=el("button",{class:"btn ghost"},"Tout exporter (JSON)");
-  dlcsv.onclick=()=>exportRevueCSV(); dljson.onclick=()=>exportRevueJSON();
-  const apiI=el("input",{type:"text",placeholder:"API backend (optionnel)",value:apiBase(),
-    style:"border:1px solid var(--line);border-radius:10px;padding:6px 10px;font-size:12px;background:var(--surface);color:var(--ink);min-width:230px"});
-  apiI.onchange=()=>{apiSetBase(apiI.value);};
-  bar.appendChild(el("span",{class:"cap",style:"padding:0;font-weight:700"},"Backend :"));bar.appendChild(apiI);
   const spacer=el("div",{style:"flex:1"});
-  bar.appendChild(spacer);bar.appendChild(el("span",{class:"cap",style:"padding:0"},nrev+" revue(s)"));bar.appendChild(dlcsv);bar.appendChild(dljson);
+  // Les revues sont enregistrees en base (MinIO) automatiquement : plus de telechargement ici.
+  bar.appendChild(spacer);
+  bar.appendChild(el("span",{class:"cap",style:"padding:0"},nrev+" revue(s) enregistree(s) en base"));
   hero.appendChild(bar);
   wrap.appendChild(hero);
 
@@ -656,7 +667,7 @@ function referentielView(){
 function templatesSection(){
   const card=el("div",{class:"card",style:"border-left:4px solid "+CO.sky});
   card.appendChild(el("h3",{style:"margin:0 0 2px;font-size:16px;font-weight:800",html:'<span style="display:inline-flex;vertical-align:-3px;margin-right:6px;color:'+CO.sky+'">'+ico("upload")+'</span>Templates de reporting (par reporting)'}));
-  card.appendChild(el("p",{class:"cap",style:"margin:2px 0 12px;padding:0"},"Chaque reporting a SA zone d'upload : cliquez « Gerer les templates » (ou le reporting dans le kanban) pour charger un ou PLUSIEURS documents. Stockage MinIO cote serveur ; ici en local, telechargeables."));
+  card.appendChild(el("p",{class:"cap",style:"margin:2px 0 12px;padding:0"},"Chaque reporting a SA zone d'upload : cliquez « Gerer les templates » (ou le reporting dans le kanban) pour charger un ou PLUSIEURS documents. Stockage en base (MinIO) cote serveur."));
   const reps=BC.filter(o=>o.kind==="Reporting"&&o.entite===refEnt);const t=loadTpl();
   const grid=el("div",{style:"display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:10px"});
   reps.forEach(r=>{const n=(t[r.id]||[]).length;
@@ -734,23 +745,14 @@ function addObligationSection(){
       periodicite:iPeri.value.trim(),domain:iDom.value.trim(),authority:iAuth.value.trim(),criticite:iCrit.value,
       crit:iSanc.value.trim()||iCrit.value,destinataire:dest,nature_dest:nd,contenant:iCont.value,sources:srcs,ts:Date.now()};
     const arr=loadAjouts();arr.unshift(a);saveAjouts(arr);
-    apiSendJSON("POST","/obligations",a);
-    st.textContent="Obligation ajoutee au kanban de l'evenement.";draw();};
+    st.textContent="Enregistrement...";addB.disabled=true;
+    Promise.resolve(apiSendJSON("POST","/obligations",a)).then(okv=>{
+      addB.disabled=false;
+      if(okv===false){st.textContent="Ajout garde en local ; echec serveur, reessayez.";}
+      else if(okv===null){st.textContent="Obligation ajoutee (local, backend non configure).";}
+      else{st.textContent="Obligation ajoutee au kanban et enregistree en base.";}
+      draw();});};
   return card;
-}
-
-// Exports : la revue (CSV a partager) et tout (JSON : revue + ajouts + templates).
-function exportRevueCSV(){
-  const rev=loadRev();const rows=Object.values(rev);
-  if(!rows.length){alert("Aucune revue a telecharger. Validez/rejetez des obligations d'abord.");return;}
-  const esc=s=>'"'+String(s==null?"":s).replace(/"/g,'""')+'"';
-  const head=["date","entite","evenement","obligation_id","obligation","type","verdict","appreciation"];
-  const lines=rows.map(r=>[new Date(r.ts).toISOString(),r.entite,r.event,r.id,r.name,r.kind,r.verdict,r.appreciation].map(esc).join(","));
-  dlFile("revue-pilotis-"+new Date().toISOString().slice(0,10)+".csv",head.map(esc).join(",")+"\n"+lines.join("\n"),"text/csv;charset=utf-8");
-}
-function exportRevueJSON(){
-  const out={revue:loadRev(),ajouts:loadAjouts(),templates:loadTpl(),export_le:new Date().toISOString()};
-  dlFile("pilotis-specifications-"+new Date().toISOString().slice(0,10)+".json",JSON.stringify(out,null,2),"application/json");
 }
 
 /* ============================================================================
@@ -1033,7 +1035,7 @@ function recurrentView(){
 function feedbackView(){
   const wrap=el("div"); const card=el("div",{class:"card"});
   card.appendChild(el("h2",{style:"margin:0 0 4px;font-size:18px;font-weight:800"},"Avis des experts"));
-  card.appendChild(el("p",{class:"fb-note",style:"margin:0 0 16px"},"Laissez votre appreciation sur le flow. Les avis sont enregistres dans votre navigateur et TELECHARGEABLES (JSON / CSV) pour traiter et mettre a jour le referentiel."));
+  card.appendChild(el("p",{class:"fb-note",style:"margin:0 0 16px"},"Laissez votre appreciation sur le flow. Les avis sont enregistres en base (MinIO) ; leur exploitation se fait cote administration."));
   const form=el("div",{class:"fb-form"});
   const nom=el("input",{type:"text",placeholder:"Votre nom / role"});
   // Les avis se rattachent d'abord aux OBLIGATIONS : constats d'operation + reportings recurrents.
@@ -1060,18 +1062,14 @@ function feedbackView(){
   form.appendChild(el("label",{},"Commentaire")); form.appendChild(cmt);
   const rowb=el("div",{style:"display:flex;gap:12px;align-items:center"}); rowb.appendChild(send); rowb.appendChild(status); form.appendChild(rowb);
   card.appendChild(form);
-  // Barre d'exploitation : telecharger les retours pour traiter et mettre a jour le referentiel.
+  // Les avis partent en base (MinIO) ; l'exploitation se fait cote administration.
   const tools=el("div",{style:"display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0 8px"});
-  const dlJson=el("button",{class:"btn ghost"},"Telecharger (JSON)");
-  const dlCsv=el("button",{class:"btn ghost"},"Telecharger (CSV)");
-  const clearBtn=el("button",{class:"btn ghost"},"Vider");
   const count=el("span",{class:"fb-note"},"");
-  tools.appendChild(el("span",{class:"fb-note",style:"font-weight:700"},"Exploiter les retours :"));
-  tools.appendChild(dlJson); tools.appendChild(dlCsv); tools.appendChild(clearBtn); tools.appendChild(count);
+  tools.appendChild(count);
   card.appendChild(tools);
   const list=el("div",{class:"fb-list"}); card.appendChild(list); wrap.appendChild(card);
 
-  // Stockage local (marche partout, sans backend) = source de verite pour le telechargement.
+  // Miroir local pour l'affichage ; la source de verite est la base (MinIO) via POST /avis.
   const LSKEY="pilotis-avis";
   function loadLocal(){try{return JSON.parse(localStorage.getItem(LSKEY)||"[]");}catch(e){return [];}}
   function saveLocal(a){try{localStorage.setItem(LSKEY,JSON.stringify(a));}catch(e){}}
@@ -1080,22 +1078,6 @@ function feedbackView(){
   function mergeIn(items){const seen={};avis.forEach(a=>seen[keyOf(a)]=1);let added=0;
     items.forEach(a=>{const k=keyOf(a);if(!seen[k]){seen[k]=1;avis.push(a);added++;}});
     if(added){avis.sort((x,y)=>(y.ts||0)-(x.ts||0));saveLocal(avis);}return added;}
-
-  function dl(name,txt,mime){const b=new Blob([txt],{type:mime});const u=URL.createObjectURL(b);
-    const a=el("a",{href:u,download:name});document.body.appendChild(a);a.click();a.remove();
-    setTimeout(()=>URL.revokeObjectURL(u),1500);}
-  function toCSV(items){const esc=s=>'"'+String(s==null?"":s).replace(/"/g,'""')+'"';
-    const head=["date","nom","obligation","verdict","commentaire"];
-    const rows=items.map(a=>[new Date(a.ts||Date.now()).toISOString(),a.nom||"",a.obligation||a.scenario||"",a.verdict||"",a.commentaire||""].map(esc).join(","));
-    return head.map(esc).join(",")+"\n"+rows.join("\n");}
-  const stamp=()=>new Date().toISOString().slice(0,10);
-  dlJson.onclick=()=>{if(!avis.length){status.textContent="Aucun avis a telecharger.";return;}
-    dl("avis-pilotis-"+stamp()+".json",JSON.stringify(avis,null,2),"application/json");};
-  dlCsv.onclick=()=>{if(!avis.length){status.textContent="Aucun avis a telecharger.";return;}
-    dl("avis-pilotis-"+stamp()+".csv",toCSV(avis),"text/csv;charset=utf-8");};
-  clearBtn.onclick=()=>{if(!avis.length)return;
-    if(!confirm("Vider les avis enregistres dans ce navigateur ? (telechargez-les d'abord)"))return;
-    avis=[];saveLocal(avis);renderList(avis);};
 
   const VC={ok:["Valide",CO.green],revoir:["A revoir",CO.amber],bloquant:["Bloquant",CO.red]};
   function renderList(items){ count.textContent=items.length+" avis enregistre(s)";
@@ -1115,11 +1097,19 @@ function feedbackView(){
 
   send.onclick=async()=>{ const c=cmt.value.trim(); if(!c){status.textContent="Ecrivez un commentaire.";return;}
     let obl=scen.value||""; if(obl==="__autre__"){obl=autreInp.value.trim(); if(!obl){status.textContent="Nommez l'obligation a ajouter.";autreInp.focus();return;}}
-    const entry={nom:nom.value.trim()||"Anonyme",obligation:obl,verdict:verdict,commentaire:c,ts:Date.now()};
+    const ent=(typeof refEnt!=="undefined"?refEnt:"");
+    const entry={nom:nom.value.trim()||"Anonyme",obligation:obl,verdict:verdict,commentaire:c,entite:ent,ts:Date.now()};
     avis.unshift(entry); saveLocal(avis); renderList(avis);
     cmt.value=""; if(scen.value==="__autre__"){autreInp.value="";}
-    status.textContent="Avis enregistre (telechargeable ci-dessous). Merci.";
     if(dbRef){try{await dbRef.add(entry);}catch(e){}}
+    // Enregistrement en base (MinIO) avec confirmation.
+    status.textContent="Enregistrement...";send.disabled=true;
+    Promise.resolve(apiSendJSON("POST","/avis",{nom:entry.nom,obligation:entry.obligation,verdict:entry.verdict,commentaire:entry.commentaire,entite:ent})).then(okv=>{
+      send.disabled=false;
+      if(okv===false){status.textContent="Echec de l'envoi ; l'avis est garde en local, reessayez.";}
+      else if(okv===null){status.textContent="Avis enregistre (local, backend non configure). Merci.";}
+      else{status.textContent="Avis enregistre. Merci.";}
+    });
   };
   return wrap;
 }
@@ -1241,11 +1231,10 @@ const DECL_ORDER=["entry","calendar","event_based","conditional","continuous"];
 function instanciationView(){
   const wrap=el("div");
 
-  // stockage local des obligations AJOUTEES par l'expert (telechargeables).
+  // stockage local des obligations AJOUTEES par l'expert (miroir de la base MinIO).
   const AJOUT_KEY="pilotis-obl-ajout";
   function loadAjout(){try{return JSON.parse(localStorage.getItem(AJOUT_KEY)||"[]");}catch(e){return [];}}
   function saveAjout(a){try{localStorage.setItem(AJOUT_KEY,JSON.stringify(a));}catch(e){}}
-  function dlFile(name,txt,mime){const b=new Blob([txt],{type:mime});const u=URL.createObjectURL(b);const a=el("a",{href:u,download:name});document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),1500);}
   let ajouts=loadAjout();
 
   // -- 1. le fil : Console -> Instance nee -> Actions generent (numerote) --
@@ -1331,7 +1320,7 @@ function instanciationView(){
   const contrib=el("div",{class:"card",style:"border-left:4px solid "+CO.teal});
   contrib.appendChild(el("h3",{style:"margin:0 0 2px;font-size:16px;font-weight:800",html:'<span style="display:inline-flex;vertical-align:-3px;margin-right:6px;color:'+CO.teal+'">'+ico("upload")+'</span>Contribuer : ajouter une obligation'}));
   contrib.appendChild(el("p",{class:"cap",style:"margin:2px 0 14px;padding:0"},
-    "L'expert ajoute une obligation et definit ce qui la declenche : un evenement DEJA PRESENT, ou un NOUVEL evenement. Les ajouts sont telechargeables (JSON/CSV) pour mettre a jour le referentiel."));
+    "L'expert ajoute une obligation et definit ce qui la declenche : un evenement DEJA PRESENT, ou un NOUVEL evenement. Les ajouts sont enregistres en base (MinIO) pour mettre a jour le referentiel."));
 
   const EVN=["Entree en relation (KYC)","Operation significative / ordre","Introduction en bourse (IPO)",
     "Modification du dossier d'agrement","Changement de dirigeant","Soupcon (LBC/FT)",
@@ -1364,22 +1353,13 @@ function instanciationView(){
   contrib.appendChild(form);
   contrib.appendChild(el("div",{style:"margin-top:6px"},"")); contrib.lastChild.appendChild(st);
 
-  // liste des ajouts + telechargement
+  // liste des ajouts (enregistres en base)
   const alist=el("div",{style:"margin-top:12px;display:flex;flex-direction:column;gap:6px"});
   function renderAjouts(){
     alist.innerHTML="";
     const mine=ajouts.filter(a=>a.entite===instEnt);
     const bar=el("div",{style:"display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-top:1px dashed var(--line);padding-top:10px"});
-    bar.appendChild(el("span",{class:"cap",style:"padding:0;font-weight:700"},"Ajouts ("+mine.length+")"));
-    const bj=el("button",{class:"btn ghost"},"Telecharger (JSON)");
-    const bc2=el("button",{class:"btn ghost"},"Telecharger (CSV)");
-    bj.onclick=()=>{if(!ajouts.length){st.textContent="Aucun ajout.";return;}dlFile("obligations-ajout-"+new Date().toISOString().slice(0,10)+".json",JSON.stringify(ajouts,null,2),"application/json");};
-    bc2.onclick=()=>{if(!ajouts.length){st.textContent="Aucun ajout.";return;}
-      const esc=s=>'"'+String(s==null?"":s).replace(/"/g,'""')+'"';
-      const head=["date","entite","intitule","declencheur","evenement","contenant","criticite"];
-      const rows=ajouts.map(a=>[new Date(a.ts).toISOString(),a.entite,a.intitule,a.declencheur,a.evenement,a.contenant,a.criticite].map(esc).join(","));
-      dlFile("obligations-ajout-"+new Date().toISOString().slice(0,10)+".csv",head.map(esc).join(",")+"\n"+rows.join("\n"),"text/csv;charset=utf-8");};
-    bar.appendChild(bj); bar.appendChild(bc2);
+    bar.appendChild(el("span",{class:"cap",style:"padding:0;font-weight:700"},"Ajouts ("+mine.length+") - enregistres en base"));
     alist.appendChild(bar);
     mine.forEach(a=>{
       const declLabel=(DECL[a.declencheur]||[a.declencheur])[0];
@@ -1398,10 +1378,18 @@ function instanciationView(){
     const titre=inTitle.value.trim();
     if(!titre){st.textContent="Donnez un intitule.";inTitle.focus();return;}
     let evt=inEvt.value; if(evt==="__new__"){evt=inNew.value.trim(); if(!evt){st.textContent="Nommez le nouvel evenement.";inNew.focus();return;}}
-    ajouts.unshift({entite:instEnt,intitule:titre,declencheur:inDecl.value,evenement:evt,contenant:inCont.value,criticite:inCrit.value,ts:Date.now()});
+    const a={entite:instEnt,intitule:titre,declencheur:inDecl.value,evenement:evt,contenant:inCont.value,criticite:inCrit.value,ts:Date.now()};
+    ajouts.unshift(a);
     saveAjout(ajouts);
-    st.textContent="Obligation ajoutee (visible dans le socle ci-dessus, telechargeable).";
-    draw();
+    // Enregistrement en base (MinIO) avec confirmation.
+    st.textContent="Enregistrement...";addBtn.disabled=true;
+    Promise.resolve(apiSendJSON("POST","/obligations",a)).then(okv=>{
+      addBtn.disabled=false;
+      if(okv===false){st.textContent="Ajout garde en local ; echec serveur, reessayez.";}
+      else if(okv===null){st.textContent="Obligation ajoutee (local, backend non configure).";}
+      else{st.textContent="Obligation ajoutee et enregistree en base.";}
+      draw();
+    });
   };
   wrap.appendChild(contrib);
 
