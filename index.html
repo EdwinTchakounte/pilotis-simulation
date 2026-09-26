@@ -734,8 +734,12 @@ function parcoursView(){
   // Routage ORTHOGONAL : un seul angle droit par arete (oriente par l'axe
   // dominant), pas de diagonale croisee. Le paquet suit la meme polyligne.
   function orthoPts(A,B){
-    if(Math.abs(B.x-A.x)>=Math.abs(B.y-A.y))return [[A.x,A.y],[B.x,A.y],[B.x,B.y]];
-    return [[A.x,A.y],[A.x,B.y],[B.x,B.y]];
+    // Coin choisi de facon DETERMINISTE, independante du sens (aller = retour) :
+    // parmi les deux coins possibles, on prend le plus haut puis le plus a gauche.
+    // Ainsi l'arete A->B et l'arete B->A empruntent exactement le meme trace.
+    const c1=[B.x,A.y], c2=[A.x,B.y];
+    const corner=(c1[1]<c2[1]||(c1[1]===c2[1]&&c1[0]<=c2[0]))?c1:c2;
+    return [[A.x,A.y],corner,[B.x,B.y]];
   }
   function orthoPath(A,B){return "M "+orthoPts(A,B).map(q=>q[0]+" "+q[1]).join(" L ");}
   function ptAt(pts,f){let seg=[],tot=0;for(let i=0;i<pts.length-1;i++){const d=Math.hypot(pts[i+1][0]-pts[i][0],pts[i+1][1]-pts[i][1]);seg.push(d);tot+=d;}
