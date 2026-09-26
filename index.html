@@ -556,9 +556,17 @@ function recurrentView(){
   const sp=el("div",{class:"speed"}); const rg=el("input",{type:"range",min:"1",max:"10",value:String(speedVal)}); sp.appendChild(el("span",{},"Vitesse")); sp.appendChild(rg);
   const tl=el("span",{class:"lg"},"t = 0");
   ctrl.appendChild(play);ctrl.appendChild(reset);ctrl.appendChild(tl);ctrl.appendChild(sp); card.appendChild(ctrl);
-  card.appendChild(el("div",{class:"cap"},"Simulation de l'exercice : les cycles de reporting se consolident dans le temps."));
+  card.appendChild(el("div",{class:"cap"},"Simulation de l'exercice : les cycles de reporting se consolident dans le temps. Cliquez un cycle pour son descriptif (informations a rassembler, interne/externe)."));
   const ents=[["ACT-SDG","Financia-Gestion (SGP)",CO.blue],["ACT-SDB","Financia-Bourse",CO.violet]];
   const N=44;
+  // Un cycle -> l'obligation de reporting correspondante dans la base (pour le drawer).
+  function cycleObj(c,tid){
+    const ent=tid==="ACT-SDG"?"Financia-Gestion":"Financia-Bourse";
+    const nn=bnorm(c.name||"");
+    const match=BC.filter(o=>o.kind==="Reporting"&&o.entite===ent).find(o=>{const bn=bnorm(o.name);return bn&&nn&&(bn.indexOf(nn)>=0||nn.indexOf(bn)>=0);});
+    if(match)return match;
+    return {id:c.id,name:c.name,kind:"Reporting",entite:ent,crit:c.criticality||"",periodicite:c.frequency||"",deadline:c.deadline||"",declencheur:"calendar",destinataire:"COSUMAF",nature_dest:"externe",sources:[]};
+  }
   function sched(c,idx){const b=bnorm(c.deadline)+" "+bnorm(c.frequency);let mo=null;MONTHS.forEach((m,k)=>{if(b.indexOf(m)>=0)mo=k;});
     const start= mo==null? 2+(idx%6) : Math.round(2+(mo/11)*(N*0.55)); const end=start+7;
     const st=c.state; let cap=1,color=CO.green; if(st==="awaiting_signal"){cap=.7;color=CO.amber;} else if(st==="open"){cap=.55;color=CO.blue;}
@@ -575,9 +583,10 @@ function recurrentView(){
     const ehcol=el("div",{style:"flex:1"}); ehcol.appendChild(eh);
     ent.appendChild(eh); ent.appendChild(g);
     const tiles=el("div",{class:"tiles"}); const tref=[];
-    scheds[tid].forEach(s=>{const tile=el("div",{class:"tile"});const idc=(s.c.id||"").split("-").pop();
+    scheds[tid].forEach(s=>{const tile=el("div",{class:"tile",style:"cursor:pointer"});const idc=(s.c.id||"").split("-").pop();
       tile.appendChild(el("div",{class:"id"},idc||"?")); tile.appendChild(el("div",{},clean(s.c.name||"").slice(0,18)));
-      const tb=el("div",{class:"tbar"});const ti=el("i");tb.appendChild(ti);tile.appendChild(tb);tiles.appendChild(tile);tref.push({s,ti});});
+      const tb=el("div",{class:"tbar"});const ti=el("i");tb.appendChild(ti);tile.appendChild(tb);tiles.appendChild(tile);tref.push({s,ti});
+      tile.onclick=()=>showInfo(obligationInfoHtml(cycleObj(s.c,tid)));});
     ent.appendChild(tiles); entwrap.appendChild(ent); refs[tid]={gi,gpct,tref};
   });
   card.appendChild(entwrap);
