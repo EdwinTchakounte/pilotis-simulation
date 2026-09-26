@@ -307,6 +307,13 @@ function tplExt(fn){const m=/\.([a-z0-9]+)$/i.exec(fn||"");return m?m[1].toLower
 function tplNomencl(repId,n,e,folder){return (folder||"reportings")+"/"+repId+"/"+repId+"__tpl_"+n+"."+(e||"txt");}
 function fmtSize(b){b=b||0;return b<1024?b+" o":(b<1048576?(b/1024).toFixed(0)+" Ko":(b/1048576).toFixed(1)+" Mo");}
 
+// ---- Envoi au BACKEND simulation (optionnel) : best-effort, en plus du localStorage.
+// L'URL vient de ?api=... (persistee) ou du champ "API backend" du bandeau.
+function apiBase(){try{const u=new URLSearchParams(location.search).get("api");if(u){localStorage.setItem("pilotis-api",u);}return (localStorage.getItem("pilotis-api")||"").replace(/\/+$/,"");}catch(e){return "";}}
+function apiSetBase(u){try{localStorage.setItem("pilotis-api",(u||"").trim().replace(/\/+$/,""));}catch(e){}}
+function apiSendJSON(method,path,body){const b=apiBase();if(!b)return;try{fetch(b+path,{method:method,headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}).catch(()=>{});}catch(e){}}
+function apiUpload(path,form){const b=apiBase();if(!b)return Promise.resolve(null);try{return fetch(b+path,{method:"POST",body:form}).then(r=>r.ok?r.json():null).catch(()=>null);}catch(e){return Promise.resolve(null);}}
+
 // Drawer descriptif + REVUE (valider / rejeter / appreciation) d'une obligation.
 function showObligation(o){
   const rv=(loadRev()[o.id]||{});
@@ -336,9 +343,11 @@ function showObligation(o){
   let verdict=rv.verdict||"";
   _idr.querySelectorAll(".rvb").forEach(b=>b.onclick=()=>{verdict=b.getAttribute("data-k");
     _idr.querySelectorAll(".rvb").forEach(x=>{const k=x.getAttribute("data-k");const c=k==="valide"?CO.green:CO.red;const on=k===verdict;x.style.background=on?c:"transparent";x.style.color=on?"#fff":c;});});
-  _idr.querySelector("#rvsave").onclick=()=>{const r=loadRev();
-    r[o.id]={id:o.id,name:o.name,event:o.event||"",entite:o.entite||"",kind:o.kind||"",verdict:verdict,appreciation:_idr.querySelector("#rvappr").value.trim(),ts:Date.now()};
-    saveRev(r);hideInfo();draw();};
+  _idr.querySelector("#rvsave").onclick=()=>{const r=loadRev();const appr=_idr.querySelector("#rvappr").value.trim();
+    r[o.id]={id:o.id,name:o.name,event:o.event||"",entite:o.entite||"",kind:o.kind||"",verdict:verdict,appreciation:appr,ts:Date.now()};
+    saveRev(r);
+    apiSendJSON("PUT","/reviews",{entite:o.entite||"",obligation_id:o.id,name:o.name||"",verdict:verdict,appreciation:appr,kind:o.kind||"",event:o.event||""});
+    hideInfo();draw();};
   {
     const box=_idr.querySelector("#tplbox"),fileI=_idr.querySelector("#tplfile"),nameI=_idr.querySelector("#tplname"),st=_idr.querySelector("#tplst");
     const MAXB=1.4*1024*1024;
@@ -357,7 +366,10 @@ function showObligation(o){
     function commit(entry){const t=loadTpl();const arr=t[o.id]||[];const n=arr.length+1;entry.n=n;entry.nomenclature=tplNomencl(o.id,n,entry.ext,tplFolder);entry.ts=Date.now();arr.push(entry);t[o.id]=arr;
       try{saveTpl(t);}catch(e){st.textContent="Stockage local plein.";return;}fileI.value="";nameI.value="";st.textContent="Exemple "+n+" ajoute.";renderBox();}
     _idr.querySelector("#tpladd").onclick=()=>{const f=fileI.files&&fileI.files[0];const nm=nameI.value.trim()||(f?f.name:"template");
-      if(f){const e=tplExt(f.name);if(f.size>MAXB){commit({name:nm,filename:f.name,mime:f.type,size:f.size,ext:e,stored:false});return;}
+      if(f){const e=tplExt(f.name);
+        // envoi au backend (best-effort, stockage MinIO) en plus du local
+        const fd=new FormData();fd.append("file",f);fd.append("obligation_id",o.id);fd.append("folder",tplFolder);fd.append("name",nm);fd.append("entite",o.entite||"");apiUpload("/templates",fd);
+        if(f.size>MAXB){commit({name:nm,filename:f.name,mime:f.type,size:f.size,ext:e,stored:false});return;}
         const rd=new FileReader();rd.onload=()=>commit({name:nm,filename:f.name,mime:f.type,size:f.size,ext:e,dataUrl:String(rd.result||""),stored:true});rd.readAsDataURL(f);return;}
       st.textContent="Choisissez un document.";};
   }
@@ -525,6 +537,10 @@ function referentielView(){
   const dlcsv=el("button",{class:"btn ghost"},"Telecharger la revue (CSV)");
   const dljson=el("button",{class:"btn ghost"},"Tout exporter (JSON)");
   dlcsv.onclick=()=>exportRevueCSV(); dljson.onclick=()=>exportRevueJSON();
+  const apiI=el("input",{type:"text",placeholder:"API backend (optionnel)",value:apiBase(),
+    style:"border:1px solid var(--line);border-radius:10px;padding:6px 10px;font-size:12px;background:var(--surface);color:var(--ink);min-width:230px"});
+  apiI.onchange=()=>{apiSetBase(apiI.value);};
+  bar.appendChild(el("span",{class:"cap",style:"padding:0;font-weight:700"},"Backend :"));bar.appendChild(apiI);
   const spacer=el("div",{style:"flex:1"});
   bar.appendChild(spacer);bar.appendChild(el("span",{class:"cap",style:"padding:0"},nrev+" revue(s)"));bar.appendChild(dlcsv);bar.appendChild(dljson);
   hero.appendChild(bar);
@@ -673,7 +689,9 @@ function addObligationSection(){
     const a={entite:refEnt,id:"ADD-"+Date.now(),intitule:nm,kind:iKind.value,declencheur:iDecl.value,evenement:evt,
       periodicite:iPeri.value.trim(),domain:iDom.value.trim(),authority:iAuth.value.trim(),criticite:iCrit.value,
       crit:iSanc.value.trim()||iCrit.value,destinataire:dest,nature_dest:nd,contenant:iCont.value,sources:srcs,ts:Date.now()};
-    const arr=loadAjouts();arr.unshift(a);saveAjouts(arr);st.textContent="Obligation ajoutee au kanban de l'evenement.";draw();};
+    const arr=loadAjouts();arr.unshift(a);saveAjouts(arr);
+    apiSendJSON("POST","/obligations",a);
+    st.textContent="Obligation ajoutee au kanban de l'evenement.";draw();};
   return card;
 }
 
