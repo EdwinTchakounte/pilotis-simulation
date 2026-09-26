@@ -118,7 +118,6 @@
     <button data-v="reviews" class="on">Revues</button>
     <button data-v="obligations">Obligations ajoutees</button>
     <button data-v="templates">Templates</button>
-    <button data-v="avis">Avis</button>
   </div>
 
   <div class="card">
@@ -152,7 +151,7 @@ function downUrl(x){if(x.dataUrl)return x.dataUrl;if(x.key&&data._base)return co
 function openPreview(title,view,down){$("mtitle").textContent=title||"Apercu";$("mframe").src=view;$("mdl").href=down||view;$("ov").classList.add("on");$("modal").classList.add("on");}
 function closePreview(){$("modal").classList.remove("on");$("ov").classList.remove("on");$("mframe").src="about:blank";}
 let view="reviews";
-let data={reviews:[],obligations:[],templates:[],avis:[]};
+let data={reviews:[],obligations:[],templates:[]};
 
 // theme
 function setTheme(t){document.documentElement.setAttribute("data-theme",t);try{localStorage.setItem("pilotis-admin-theme",t);}catch(e){}}
@@ -174,16 +173,14 @@ async function load(){
   if(base){
     try{
       const q=ent?("?entite="+encodeURIComponent(ent)):"";
-      const [rv,ob,tp,av]=await Promise.all([
+      const [rv,ob,tp]=await Promise.all([
         fetch(base+"/reviews"+q).then(r=>r.json()),
         fetch(base+"/obligations"+q).then(r=>r.json()),
         fetch(base+"/templates/all"+q).then(r=>r.json()).catch(()=>[]),
-        fetch(base+"/avis"+q).then(r=>r.json()).catch(()=>[]),
       ]);
       data.reviews=Array.isArray(rv)?rv:[];
       data.obligations=Array.isArray(ob)?ob:[];
       data.templates=Array.isArray(tp)?tp:[];
-      data.avis=Array.isArray(av)?av:[];
       data._base=base;
       $("status").textContent="Charge depuis le backend ("+data.reviews.length+" revues).";
     }catch(e){$("status").textContent="Backend injoignable : "+e.message+" - repli local.";localMode(ent);}
@@ -196,7 +193,6 @@ function localMode(ent){
   data.obligations=loadLocal("pilotis-obl-ajout","[]").filter(o=>!ent||o.entite===ent);
   const tpl=loadLocal("pilotis-templates","{}");
   data.templates=Object.entries(tpl).flatMap(([id,arr])=>(arr||[]).map(x=>({obligation_id:id,...x})));
-  data.avis=loadLocal("pilotis-avis","[]").filter(a=>!ent||!a.entite||a.entite===ent);
   data._base="";
   $("status").textContent="Retours de ce navigateur (local) : "+data.reviews.length+" revues.";
 }
@@ -207,15 +203,14 @@ function kpis(){
   const j=data.reviews.filter(r=>r.verdict==="rejete").length;
   const a=data.reviews.filter(r=>(r.appreciation||"").trim()).length;
   [["Revues",data.reviews.length,"#2563EB"],["Validees",v,"#46A873"],["Rejetees",j,"#DC7E7E"],
-   ["Avec appreciation",a,"#8A72E2"],["Obligations ajoutees",data.obligations.length,"#33A99B"],
-   ["Avis",data.avis.length,"#E08E45"]]
+   ["Avec appreciation",a,"#8A72E2"],["Obligations ajoutees",data.obligations.length,"#33A99B"]]
    .forEach(([l,n,c])=>box.appendChild(el("div",{class:"kpi",style:"border-left-color:"+c,html:'<div class="n" style="color:'+c+'">'+n+'</div><div class="l">'+l+'</div>'})));
 }
 
 function render(){
   kpis();
   const body=$("body");body.innerHTML="";
-  $("secTitle").textContent=view==="reviews"?"Revues":(view==="obligations"?"Obligations ajoutees":(view==="avis"?"Avis":"Templates"));
+  $("secTitle").textContent=view==="reviews"?"Revues":(view==="obligations"?"Obligations ajoutees":"Templates");
   if(view==="reviews"){
     if(!data.reviews.length){body.innerHTML='<div class="empty">Aucune revue.</div>';return;}
     const t=el("table");t.innerHTML='<thead><tr><th>Entite</th><th>Obligation</th><th>Verdict</th><th>Appreciation</th><th>Date</th></tr></thead>';
@@ -236,20 +231,6 @@ function render(){
     data.obligations.forEach(o=>{const tr=el("tr");
       tr.innerHTML='<td>'+clean(o.entite)+'</td><td>'+clean(o.intitule)+'</td><td>'+clean(o.declencheur)+'</td><td>'+clean(o.evenement||"")+'</td><td>'+clean(o.criticite||"")+'</td>';
       tb.appendChild(tr);});
-    t.appendChild(tb);body.appendChild(t);
-  }else if(view==="avis"){
-    if(!data.avis.length){body.innerHTML='<div class="empty">Aucun avis.</div>';return;}
-    const VC={ok:["Valide","#46A873"],revoir:["A revoir","#E0A100"],bloquant:["Bloquant","#DC7E7E"]};
-    const t=el("table");t.innerHTML='<thead><tr><th>Nom</th><th>Obligation</th><th>Verdict</th><th>Commentaire</th><th>Entite</th><th>Date</th></tr></thead>';
-    const tb=el("tbody");
-    data.avis.slice().sort((x,y)=>(y.ts||0)-(x.ts||0)).forEach(a=>{
-      const [vl,vc]=VC[a.verdict]||["-","#9AA6BC"];const tr=el("tr");
-      tr.innerHTML='<td>'+clean(a.nom||"Anonyme")+'</td><td>'+clean(a.obligation||"Portee generale")+'</td>'
-        +'<td><span class="badge" style="background:'+vc+'22;color:'+vc+'">'+vl+'</span></td>'
-        +'<td>'+clean(a.commentaire||"")+'</td><td>'+clean(a.entite||"")+'</td>'
-        +'<td class="cap">'+(a.ts?new Date(a.ts).toLocaleString("fr-FR"):"")+'</td>';
-      tb.appendChild(tr);
-    });
     t.appendChild(tb);body.appendChild(t);
   }else{
     if(!data.templates.length){body.innerHTML='<div class="empty">Aucun template charge.</div>';return;}
